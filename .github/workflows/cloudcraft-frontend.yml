@@ -39,3 +39,26 @@ jobs:
         run: pnpm --filter @modrinth/app-frontend run lint
       - name: Production frontend build
         run: pnpm --filter @modrinth/app-frontend run build
+
+  rust:
+    name: Rust formatting and local backup tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl wget file libssl-dev libxdo-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf \
+            libwebkit2gtk-4.1-dev
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check Rust formatting
+        run: cargo fmt --check --package theseus_gui
+      - name: Run desktop crate tests
+        run: cargo test --package theseus_gui --no-default-features
