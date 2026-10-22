@@ -38,7 +38,6 @@ jobs:
             apps/app-frontend/src/pages/Index.vue \
             apps/app-frontend/src/pages/index.js \
             apps/app-frontend/src/routes.js \
-            apps/app-frontend/src/App.vue \
             apps/app-frontend/src/helpers/cloudSession.ts \
             apps/app-frontend/src/helpers/cloudStorage.ts \
             apps/app-frontend/index.html
