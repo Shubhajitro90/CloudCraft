@@ -1,4 +1,4 @@
-name: 'AstralRinth App build'
+name: 'CloudCraft desktop build'
 on:
   push:
     branches:
