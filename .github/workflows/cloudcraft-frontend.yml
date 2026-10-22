@@ -31,27 +31,24 @@ jobs:
           run_install: false
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Format CloudCraft source for review
+      - name: Verify formatting of changed frontend sources
         run: |
-          pnpm exec prettier --write apps/app-frontend/src/pages/CloudCraft.vue apps/app-frontend/src/pages/Index.vue apps/app-frontend/src/helpers/cloudSession.ts apps/app-frontend/src/helpers/cloudStorage.ts
-          echo 'BEGIN_CLOUDCRAFT_PAGE_OUTPUT'
-          cat apps/app-frontend/src/pages/CloudCraft.vue
-          echo 'END_CLOUDCRAFT_PAGE_OUTPUT'
-          echo 'BEGIN_CLOUD_SESSION_HELPER_OUTPUT'
-          cat apps/app-frontend/src/helpers/cloudSession.ts
-          echo 'END_CLOUD_SESSION_HELPER_OUTPUT'
-          echo 'BEGIN_CLOUDCRAFT_INDEX_OUTPUT'
-          cat apps/app-frontend/src/pages/Index.vue
-          echo 'END_CLOUDCRAFT_INDEX_OUTPUT'
-          echo 'BEGIN_CLOUD_STORAGE_HELPER_OUTPUT'
-          cat apps/app-frontend/src/helpers/cloudStorage.ts
-          echo 'END_CLOUD_STORAGE_HELPER_OUTPUT'
+          pnpm exec prettier --check \
+            apps/app-frontend/src/pages/CloudCraft.vue \
+            apps/app-frontend/src/pages/Index.vue \
+            apps/app-frontend/src/pages/index.js \
+            apps/app-frontend/src/routes.js \
+            apps/app-frontend/src/App.vue \
+            apps/app-frontend/src/components/ui/AccountsCard.vue \
+            apps/app-frontend/src/components/ui/RunningAppBar.vue \
+            apps/app-frontend/src/components/ui/modal/ConfirmModalWrapper.vue \
+            apps/app-frontend/src/helpers/cloudSession.ts \
+            apps/app-frontend/src/helpers/cloudStorage.ts \
+            apps/app-frontend/index.html
       - name: TypeScript and Vue typecheck
         run: pnpm --filter @modrinth/app-frontend run tsc:check
       - name: ESLint
         run: pnpm --filter @modrinth/app-frontend exec eslint .
-      - name: Prettier for CloudCraft pages and route wiring
-        run: pnpm exec prettier --check apps/app-frontend/src/pages/CloudCraft.vue apps/app-frontend/src/pages/Index.vue apps/app-frontend/src/pages/index.js apps/app-frontend/src/routes.js apps/app-frontend/src/helpers/cloudSession.ts apps/app-frontend/src/helpers/cloudStorage.ts apps/app-frontend/index.html
       - name: Production frontend build
         run: pnpm --filter @modrinth/app-frontend run build
 
