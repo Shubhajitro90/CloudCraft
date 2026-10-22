@@ -7,6 +7,7 @@ import { useBreadcrumbs } from '@/store/breadcrumbs'
 import { list, run } from '@/helpers/profile'
 import { get as getSettings, set as setSettings } from '@/helpers/settings'
 import { cloudSessionProvider } from '@/helpers/cloudSession'
+import { cloudStorageProvider } from '@/helpers/cloudStorage'
 
 const breadcrumbs = useBreadcrumbs()
 const router = useRouter()
@@ -19,6 +20,16 @@ const saveName = ref('')
 const saveNotes = ref('')
 const instances = ref([])
 const instancesLoading = ref(true)
+const cloudInstancePath = ref('')
+const cloudSessionBusy = ref(false)
+const cloudSessionError = ref('')
+const cloudStorageStatus = ref({
+  state: 'unconfigured',
+  message: 'Checking cloud storage provider status…',
+  canUpload: false,
+  canDownload: false,
+  canDelete: false,
+})
 const instanceError = ref('')
 const launchingPath = ref('')
 const launchError = ref('')
@@ -87,6 +98,10 @@ async function loadInstances() {
   try {
     const profiles = await list()
     instances.value = Array.isArray(profiles) ? profiles : Object.values(profiles || {})
+    if (!cloudInstancePath.value) {
+      cloudInstancePath.value =
+        instances.value.find((instance) => instance.install_stage === 'installed')?.path || ''
+    }
   } catch (error) {
     instanceError.value = String(error?.message || error)
   } finally {
@@ -120,6 +135,70 @@ async function loadCloudSessionStatus() {
   }
 }
 
+async function loadCloudStorageStatus() {
+  try {
+    cloudStorageStatus.value = await cloudStorageProvider.getStatus()
+  } catch (error) {
+    cloudStorageStatus.value = {
+      state: 'error',
+      message: String(error?.message || error),
+      canUpload: false,
+      canDownload: false,
+      canDelete: false,
+    }
+  }
+}
+
+async function startCloudSession() {
+  const instance = instances.value.find((item) => item.path === cloudInstancePath.value)
+  if (!instance || instance.install_stage !== 'installed' || !cloudSessionStatus.value.canStart || cloudSessionBusy.value) {
+    return
+  }
+
+  cloudSessionBusy.value = true
+  cloudSessionError.value = ''
+  try {
+    cloudSessionStatus.value = await cloudSessionProvider.startSession({
+      instancePath: instance.path,
+      gameVersion: instance.game_version,
+    })
+  } catch (error) {
+    cloudSessionError.value = String(error?.message || error)
+  } finally {
+    cloudSessionBusy.value = false
+  }
+}
+
+async function stopCloudSession() {
+  const sessionId = cloudSessionStatus.value.sessionId
+  if (!sessionId || !cloudSessionStatus.value.canStop || cloudSessionBusy.value) return
+
+  cloudSessionBusy.value = true
+  cloudSessionError.value = ''
+  try {
+    cloudSessionStatus.value = await cloudSessionProvider.stopSession(sessionId)
+  } catch (error) {
+    cloudSessionError.value = String(error?.message || error)
+  } finally {
+    cloudSessionBusy.value = false
+  }
+}
+
+async function cancelCloudSessionStart() {
+  if (cloudSessionStatus.value.state !== 'starting' || cloudSessionBusy.value) return
+
+  cloudSessionBusy.value = true
+  cloudSessionError.value = ''
+  try {
+    await cloudSessionProvider.cancelStart()
+    await loadCloudSessionStatus()
+  } catch (error) {
+    cloudSessionError.value = String(error?.message || error)
+  } finally {
+    cloudSessionBusy.value = false
+  }
+}
+
 async function loadLauncherSettings() {
   settingsLoading.value = true
   settingsError.value = ''
@@ -138,23 +217,28 @@ async function saveMemorySettings() {
   if (!launcherSettings.value) return
   const min = memoryMin.value === '' ? null : Number(memoryMin.value)
   const max = Number(memoryMax.value)
+  const maxSetting = 4_294_967_295
   if (
-    (min !== null && (!Number.isFinite(min) || min < 256)) ||
-    !Number.isFinite(max) ||
+    (min !== null && (!Number.isInteger(min) || min < 256 || min > maxSetting)) ||
+    !Number.isInteger(max) ||
     max < 512 ||
+    max > maxSetting ||
     (min !== null && min > max)
   ) {
     settingsError.value =
-      'Enter valid memory values in MB. Minimum must be at least 256 MB and cannot exceed maximum.'
+      'Enter whole-number memory values in MB. Minimum must be at least 256 MB and cannot exceed maximum.'
     return
   }
   settingsLoading.value = true
   settingsError.value = ''
   settingsMessage.value = ''
   try {
+    // Re-read the full object before saving so unrelated settings changed elsewhere
+    // are not overwritten by an older copy held by this page.
+    const currentSettings = await getSettings()
     const updated = {
-      ...launcherSettings.value,
-      memory: { ...launcherSettings.value.memory, min, max },
+      ...currentSettings,
+      memory: { ...currentSettings.memory, min, max },
     }
     await setSettings(updated)
     launcherSettings.value = updated
@@ -174,6 +258,7 @@ onMounted(() => {
   loadInstances()
   loadLauncherSettings()
   loadCloudSessionStatus()
+  loadCloudStorageStatus()
 })
 const hasServerAddress = computed(() => serverAddress.value.trim().length > 0)
 
@@ -408,6 +493,57 @@ function addSaveNote() {
           The provider boundary defines unavailable, starting, ready, stopping, stopped, and error
           states. No remote machine is started and no provider credentials are configured.
         </p>
+        <div class="cloud-controls">
+          <label for="cloud-instance">Instance for a future remote session</label>
+          <select id="cloud-instance" v-model="cloudInstancePath" :disabled="cloudSessionBusy">
+            <option value="">Select an installed instance</option>
+            <option
+              v-for="instance in instances.filter((item) => item.install_stage === 'installed')"
+              :key="instance.path"
+              :value="instance.path"
+            >
+              {{ instance.name || instance.path }} · {{ instance.game_version || 'version unknown' }}
+            </option>
+          </select>
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-if="cloudSessionStatus.canStart"
+              class="primary-action"
+              type="button"
+              :disabled="cloudSessionBusy || !cloudInstancePath"
+              @click="startCloudSession"
+            >
+              {{ cloudSessionBusy ? 'Working…' : 'Start cloud session' }}
+            </button>
+            <button
+              v-if="cloudSessionStatus.canStop && cloudSessionStatus.sessionId"
+              class="secondary-action"
+              type="button"
+              :disabled="cloudSessionBusy"
+              @click="stopCloudSession"
+            >
+              Stop cloud session
+            </button>
+            <button
+              v-if="cloudSessionStatus.state === 'starting'"
+              class="secondary-action"
+              type="button"
+              :disabled="cloudSessionBusy"
+              @click="cancelCloudSessionStart"
+            >
+              Cancel startup
+            </button>
+            <button
+              class="secondary-action"
+              type="button"
+              :disabled="cloudSessionBusy"
+              @click="loadCloudSessionStatus"
+            >
+              Refresh status
+            </button>
+          </div>
+          <p v-if="cloudSessionError" class="inline-error" role="alert">{{ cloudSessionError }}</p>
+        </div>
       </section>
     </template>
 
@@ -706,6 +842,16 @@ function addSaveNote() {
           restore stops rather than overwriting an existing directory. Keep your own additional
           copies of important worlds. No files are uploaded anywhere.
         </p>
+        <div class="provider-note">
+          <span class="provider-indicator"></span>
+          <div>
+            <strong>
+              Cloud storage:
+              {{ cloudStorageStatus.state === 'unconfigured' ? 'not configured' : cloudStorageStatus.state }}
+            </strong>
+            <p class="m-0 mt-1 text-sm text-secondary">{{ cloudStorageStatus.message }}</p>
+          </div>
+        </div>
         <div class="divider-line"></div>
         <div class="panel-heading">
           <h3 class="m-0 text-lg font-semibold">Local backup history</h3>
@@ -1070,6 +1216,27 @@ function addSaveNote() {
 .memory-form label {
   font-size: 0.85rem;
   font-weight: 700;
+}
+.cloud-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+.cloud-controls label {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.cloud-controls select {
+  width: 100%;
+  max-width: 560px;
+  box-sizing: border-box;
+  border: 1px solid var(--color-button-bg);
+  border-radius: 0.7rem;
+  padding: 0.8rem 0.9rem;
+  background: var(--color-bg);
+  color: var(--color-contrast);
 }
 .memory-form input {
   width: 100%;
