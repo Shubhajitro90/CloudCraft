@@ -318,7 +318,7 @@ fn cloudcraft_restore_world_blocking(
         .ok_or_else(|| {
             "The selected backup folder has no valid name.".to_string()
         })?;
-    let (restored_name, timestamp) = backup_name
+    let (restored_name, _timestamp) = backup_name
         .rsplit_once("-cloudcraft-backup-")
         .filter(|(_, timestamp)| {
             timestamp.len() == 15
@@ -330,7 +330,6 @@ fn cloudcraft_restore_world_blocking(
             "This folder is not a recognized CloudCraft backup. Choose a backup folder created by CloudCraft."
                 .to_string()
         })?;
-    let _ = timestamp;
     let destination = destination_parent.join(restored_name);
     if destination.exists() {
         return Err(format!(
@@ -445,6 +444,48 @@ mod cloudcraft_backup_tests {
             fs::read(destination.join("keep.txt")).unwrap(),
             b"keep this"
         );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_rejects_symbolic_links_and_removes_partial_output() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_root();
+        let world = root.join("world");
+        let backups = root.join("backups");
+        fs::create_dir_all(&world).unwrap();
+        fs::create_dir_all(&backups).unwrap();
+        fs::write(root.join("outside.txt"), b"outside").unwrap();
+        symlink(root.join("outside.txt"), world.join("linked.txt")).unwrap();
+
+        let result = cloudcraft_backup_world_blocking(
+            world.to_str().unwrap(),
+            backups.to_str().unwrap(),
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read_dir(&backups).unwrap().count(), 0);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn restore_rejects_unrecognized_folder_names() {
+        let root = test_root();
+        let backup = root.join("not-a-cloudcraft-backup");
+        let destination_parent = root.join("worlds");
+        fs::create_dir_all(&backup).unwrap();
+        fs::create_dir_all(&destination_parent).unwrap();
+        fs::write(backup.join("level.dat"), b"metadata").unwrap();
+
+        let result = cloudcraft_restore_world_blocking(
+            backup.to_str().unwrap(),
+            destination_parent.to_str().unwrap(),
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read_dir(&destination_parent).unwrap().count(), 0);
 
         fs::remove_dir_all(root).unwrap();
     }
