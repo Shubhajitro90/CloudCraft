@@ -1,5 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { RouterLink, useRouter } from 'vue-router'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 import { list, run } from '@/helpers/profile'
@@ -36,6 +38,9 @@ function readLocalList(key) {
 
 const savedAddresses = ref(readLocalList('cloudcraft.server-addresses'))
 const backupHistory = ref(readLocalList('cloudcraft.save-reminders'))
+const backupBusy = ref(false)
+const backupError = ref('')
+const backupMessage = ref('')
 watch(backupHistory, (entries) => {
   try {
     localStorage.setItem('cloudcraft.save-reminders', JSON.stringify(entries))
@@ -50,7 +55,7 @@ const sections = [
   { id: 'mods', label: 'Mods & modpacks' },
   { id: 'performance', label: 'Performance' },
   { id: 'servers', label: 'Servers' },
-  { id: 'saves', label: 'Saves' },
+  { id: 'saves', label: 'Saves & backups' },
 ]
 
 async function loadInstances() {
@@ -151,6 +156,47 @@ async function copyAddress() {
     window.setTimeout(() => (copied.value = false), 1800)
   } catch {
     copied.value = false
+  }
+}
+
+async function chooseDirectory(title) {
+  const selection = await openDialog({ directory: true, multiple: false, title })
+  return Array.isArray(selection) ? selection[0] || null : selection
+}
+
+async function createWorldBackup() {
+  backupBusy.value = true
+  backupError.value = ''
+  backupMessage.value = ''
+  try {
+    const sourcePath = await chooseDirectory('Choose the Minecraft world folder to back up')
+    if (!sourcePath) return
+    const backupRoot = await chooseDirectory('Choose a destination folder for the world backup')
+    if (!backupRoot) return
+    const destination = await invoke('cloudcraft_backup_world', { sourcePath, backupRoot })
+    backupMessage.value = `World backup created: ${destination}`
+  } catch (error) {
+    backupError.value = String(error?.message || error)
+  } finally {
+    backupBusy.value = false
+  }
+}
+
+async function restoreWorldBackup() {
+  backupBusy.value = true
+  backupError.value = ''
+  backupMessage.value = ''
+  try {
+    const backupPath = await chooseDirectory('Choose a CloudCraft world backup folder')
+    if (!backupPath) return
+    const destinationParent = await chooseDirectory('Choose the folder where the restored world should be created')
+    if (!destinationParent) return
+    const destination = await invoke('cloudcraft_restore_world', { backupPath, destinationParent })
+    backupMessage.value = `World restored to: ${destination}`
+  } catch (error) {
+    backupError.value = String(error?.message || error)
+  } finally {
+    backupBusy.value = false
   }
 }
 
@@ -360,11 +406,21 @@ function addSaveNote() {
 
     <template v-else>
       <section class="content-panel">
-        <div class="panel-heading"><div><p class="eyebrow m-0 mb-2">BACKUP WORKSPACE</p><h2 class="m-0 text-2xl font-bold">Cloud saves</h2></div><span class="status-pill muted">Local-only reminders</span></div>
-        <p class="text-secondary mt-3">Cloud storage is not configured in this build. You can keep a local list of save reminders and export that list as JSON. This is not a backup of your actual Minecraft world files.</p>
+        <div class="panel-heading"><div><p class="eyebrow m-0 mb-2">WORLD BACKUP WORKSPACE</p><h2 class="m-0 text-2xl font-bold">Saves & backups</h2></div><span class="status-pill muted">Local backups · cloud sync off</span></div>
+        <p class="text-secondary mt-3">Back up a world by copying its selected folder to a destination you choose, or restore a CloudCraft backup into a new folder. Large worlds may take a while. The launcher will not overwrite an existing world folder.</p>
+        <div class="backup-actions">
+          <button class="primary-action" type="button" :disabled="backupBusy" @click="createWorldBackup">{{ backupBusy ? 'Working…' : 'Back up a world folder' }}</button>
+          <button class="secondary-action" type="button" :disabled="backupBusy" @click="restoreWorldBackup">{{ backupBusy ? 'Working…' : 'Restore a backup' }}</button>
+        </div>
+        <p v-if="backupMessage" class="success-message break-all" role="status">{{ backupMessage }}</p>
+        <p v-if="backupError" class="inline-error" role="alert">{{ backupError }}</p>
+        <p class="mt-3 text-sm text-secondary">Safety: source and destination must be separate folders. Symbolic links are rejected, and restore stops rather than overwriting an existing directory. Keep your own additional copies of important worlds. No files are uploaded anywhere.</p>
+        <div class="divider-line"></div>
+        <h3 class="m-0 text-lg font-semibold">Save reminders</h3>
+        <p class="text-secondary mt-2">Cloud storage and cross-device sync are not configured. These optional reminders are stored locally and can be exported as JSON; the reminder file is not a world backup.</p>
         <form class="save-form" @submit.prevent="addSaveNote">
           <label for="save-name">World or backup label</label><input id="save-name" v-model="saveName" placeholder="e.g. Survival world — before update" required />
-          <label for="save-notes">Notes <span class="text-secondary">(optional)</span></label><textarea id="save-notes" v-model="saveNotes" rows="3" placeholder="Where the world is stored, version, or what to remember…"></textarea>
+          <label for="save-notes">Notes <span class="text-secondary">(optional)</span></label><textarea id="save-notes" v-model="saveNotes" rows="3" placeholder="Version, backup location, or what to remember…"></textarea>
           <div class="flex flex-wrap gap-2"><button class="primary-action" type="submit">Add reminder</button><button class="secondary-action" type="button" :disabled="backupHistory.length === 0" @click="exportSaveManifest">Export reminder list</button></div>
         </form>
         <div v-if="backupHistory.length" class="reminder-list">
@@ -373,9 +429,9 @@ function addSaveNote() {
             <button class="text-sm text-secondary hover:text-contrast" type="button" @click="backupHistory.splice(index, 1)">Remove</button>
           </div>
         </div>
-        <div v-else class="empty-state"><span class="feature-icon">◇</span><strong>No reminders yet</strong><span class="text-sm text-secondary">Add a label to start a list before you back up a world manually.</span></div>
+        <div v-else class="empty-state"><span class="feature-icon">◇</span><strong>No reminders yet</strong><span class="text-sm text-secondary">Add a reminder to keep track of a manual backup.</span></div>
       </section>
-      <section class="notice-panel"><div class="notice-symbol">!</div><div><h3 class="m-0 text-base font-semibold">Your world files stay yours</h3><p class="m-0 mt-1 text-sm text-secondary">This page does not read, upload, or synchronize worlds, credentials, or launcher data. Cloud sync is not configured; the exported JSON is reminder metadata only.</p></div></section>
+      <section class="notice-panel"><div class="notice-symbol">!</div><div><h3 class="m-0 text-base font-semibold">Local means local</h3><p class="m-0 mt-1 text-sm text-secondary">World backup and restore operate on folders you select on this device. Cloud sync is not configured; only reminder metadata is exported as JSON.</p></div></section>
     </template>
   </main>
 </template>
@@ -412,6 +468,7 @@ function addSaveNote() {
 .inline-error { color: #fca5a5; background: rgba(185,28,28,.1); border: 1px solid rgba(248,113,113,.3); border-radius: .75rem; padding: .8rem 1rem; overflow-wrap: anywhere; }
 .success-message { color: #86efac; margin-top: 1rem; }
 .content-panel { padding: clamp(1.2rem,3vw,2rem); border: 1px solid var(--color-button-bg); border-radius: 1.25rem; background: var(--color-bg-raised); }.panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.backup-actions { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1.25rem; }.divider-line { height: 1px; margin: 1.75rem 0; background: var(--color-button-bg); }
 .server-form,.save-form { display: flex; flex-direction: column; gap: .65rem; max-width: 760px; margin-top: 1.5rem; }.server-form label,.save-form label { font-size: .85rem; font-weight: 700; }.server-form input,.save-form input,.save-form textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--color-button-bg); border-radius: .7rem; padding: .8rem .9rem; background: var(--color-bg); color: var(--color-contrast); outline: none; }.server-form input:focus,.save-form input:focus,.save-form textarea:focus { border-color: #a78bfa; }.saved-address { margin-top: 1.5rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 1rem; border-radius: .9rem; background: var(--color-bg); border: 1px solid var(--color-button-bg); }.small-label,.definition-tag { color: #b59cff; font-size: .65rem; font-weight: 800; letter-spacing: .12em; }.provider-note { margin-top: 1.5rem; }.provider-indicator { background: #8b849a; margin-top: .35rem; flex-shrink: 0; }.definition-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; margin-top: 1.2rem; }.definition-grid > div { padding: 1rem; border-radius: .9rem; background: var(--color-bg); }
 .reminder-list { margin-top: 1.5rem; border-top: 1px solid var(--color-button-bg); }.reminder-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--color-button-bg); }.reminder-row button { border: 0; background: transparent; cursor: pointer; }.empty-state { display: flex; flex-direction: column; align-items: center; gap: .75rem; padding: 2.5rem 1rem; text-align: center; }
 @media (max-width: 620px) { .hero-orbit { display: none; }.definition-grid { grid-template-columns: 1fr; }.panel-heading { align-items: stretch; } }
