@@ -119,11 +119,11 @@ import { handleError } from '@/store/notifications.js'
 import { get_many } from '@/helpers/profile.js'
 import { trackEvent } from '@/helpers/analytics'
 import { getVersion } from '@tauri-apps/api/app'
+import { installState, getRemote, updateState } from '@/helpers/update.js'
+import ModalWrapper from './modal/ModalWrapper.vue'
 
 const version = await getVersion()
 
-import { installState, getRemote, updateState } from '@/helpers/update.js'
-import ModalWrapper from './modal/ModalWrapper.vue'
 
 const confirmUpdate = ref(null)
 
