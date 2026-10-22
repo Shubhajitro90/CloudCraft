@@ -18,11 +18,12 @@ const breadcrumbs = useBreadcrumbs()
 
 breadcrumbs.setRootContext({ name: 'Home', link: route.path })
 
+const allInstances = ref([])
 const recentInstances = ref([])
 const launchInProgress = ref('')
 const launchError = ref('')
 const launchMessage = ref('')
-const selectedInstance = computed(() => recentInstances.value[0] || null)
+const selectedInstance = computed(() => recentInstances.value[0] || allInstances.value[0] || null)
 
 const offline = ref(!navigator.onLine)
 window.addEventListener('offline', () => {
@@ -35,6 +36,7 @@ window.addEventListener('online', () => {
 const getInstances = async () => {
   const result = await list().catch(handleError)
   const profiles = Array.isArray(result) ? result : Object.values(result || {})
+  allInstances.value = profiles
 
   recentInstances.value = profiles
     .filter((x) => x?.last_played)
