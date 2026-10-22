@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: cloudcraft-validation-${{ github.ref }}
@@ -37,24 +37,32 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Format changed frontend files for review
+      - name: Format changed frontend files
         run: |
           pnpm exec prettier --write \
             apps/app-frontend/src/App.vue \
             apps/app-frontend/src/components/ui/AccountsCard.vue \
             apps/app-frontend/src/components/ui/RunningAppBar.vue \
+            apps/app-frontend/src/helpers/update.js \
             apps/app-frontend/src/pages/CloudCraft.vue
 
-      - name: Upload formatted frontend sources
-        uses: actions/upload-artifact@v4
-        with:
-          name: cloudcraft-prettier-output
-          if-no-files-found: error
-          path: |
-            apps/app-frontend/src/App.vue
-            apps/app-frontend/src/components/ui/AccountsCard.vue
-            apps/app-frontend/src/components/ui/RunningAppBar.vue
+      - name: Commit formatting fixes on the implementation branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/cloudcraft-implementation'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/app-frontend/src/App.vue \
+            apps/app-frontend/src/components/ui/AccountsCard.vue \
+            apps/app-frontend/src/components/ui/RunningAppBar.vue \
+            apps/app-frontend/src/helpers/update.js \
             apps/app-frontend/src/pages/CloudCraft.vue
+          if git diff --cached --quiet; then
+            echo "Changed frontend files are already formatted."
+          else
+            git commit -m "style: format CloudCraft frontend"
+            git push
+          fi
 
       - name: Check formatting of changed frontend files
         run: |
