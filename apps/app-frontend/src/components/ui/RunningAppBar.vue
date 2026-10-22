@@ -45,10 +45,10 @@
         </Button>
       </a>
     </div>
-    <ModalWrapper ref="confirmUpdate" :has-to-type="false" header="Request to update the AstralRinth launcher">
+    <ModalWrapper ref="confirmUpdate" :has-to-type="false" header="Request to update CloudCraft">
       <div class="modal-body">
         <div class="markdown-body">
-          <p>The new version of the AstralRinth launcher is available.</p>
+          <p>A new CloudCraft version is available.</p>
           <p>Your version is outdated. We recommend that you update to the latest version.</p>
           <p>Warning:</p>
           <p>
