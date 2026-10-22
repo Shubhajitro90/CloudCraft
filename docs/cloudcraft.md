@@ -14,12 +14,14 @@ This document separates working integrations from future architecture. It should
 | Server shortcuts | Stores a limited list of addresses in local browser storage; supports copying an address | Browser local storage and clipboard |
 | Local world backups | Copies a selected world directory to a chosen backup folder with a timestamped name; restores into a new directory without overwriting existing content. Copies are uncompressed and remain on this device | Tauri commands and local filesystem copy |
 | Save reminders | Stores user-entered labels/notes locally; exports reminder metadata as JSON | Browser local storage and Blob download |
+| Cloud session boundary | Typed lifecycle contract for unavailable/starting/ready/stopping/stopped/error states; local launch remains separate | Unconfigured provider adapter; no remote session is created |
+| Cloud storage boundary | Typed provider contract for listing backups, upload/download progress, deletion, and cancellation | Unconfigured provider adapter; no account, network transfer, or credentials |
 
 ## Not implemented
 
 - **Cloud gaming:** no remote VM/session allocation, game streaming, input transport, provider credentials, billing/quota, or session lifecycle exists in this implementation.
 - **Hosted servers:** no provider API, server provisioning, lifecycle management, or remote server status is connected.
-- **Cloud saves:** no remote account, encrypted upload/download, conflict resolution, synchronization protocol, or recovery workflow is connected.
+- **Cloud saves:** the typed `cloudStorageProvider` interface defines status, backup listing, upload/download progress, deletion, and cancellation. No remote account, encrypted transfer, conflict resolution, synchronization protocol, or recovery workflow is connected; all provider operations remain unavailable until a real integration is reviewed and tested.
 - **Skins/capes:** no new system is connected.
 
 Do not label these features as live or show invented connection state. Implementing them requires choosing a real provider, reviewing its API and terms, designing credential storage and consent, adding the required backend commands, and testing failure/recovery paths.
