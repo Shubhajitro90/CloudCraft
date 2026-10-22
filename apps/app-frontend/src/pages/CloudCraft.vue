@@ -587,8 +587,8 @@ function addSaveNote() {
             <button
               class="secondary-action"
               type="button"
-              @click="loadInstances"
               :disabled="instancesLoading"
+              @click="loadInstances"
             >
               Refresh
             </button>
@@ -716,9 +716,13 @@ function addSaveNote() {
           <label for="memory-max">Maximum memory (MB)</label>
           <input id="memory-max" v-model="memoryMax" type="number" min="512" step="256" required />
           <div class="memory-presets">
-            <button class="secondary-action" type="button" @click="memoryMax = '4096'">4 GB</button
-            ><button class="secondary-action" type="button" @click="memoryMax = '6144'">6 GB</button
-            ><button class="secondary-action" type="button" @click="memoryMax = '8192'">
+            <button class="secondary-action" type="button" @click="memoryMax = '4096'">
+              4 GB
+            </button>
+            <button class="secondary-action" type="button" @click="memoryMax = '6144'">
+              6 GB
+            </button>
+            <button class="secondary-action" type="button" @click="memoryMax = '8192'">
               8 GB
             </button>
           </div>
