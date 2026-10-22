@@ -189,7 +189,10 @@ fn cloudcraft_copy_directory_contents(
 
         if file_type.is_dir() {
             fs::create_dir(&destination_path)?;
-            cloudcraft_copy_directory_contents(&source_path, &destination_path)?;
+            cloudcraft_copy_directory_contents(
+                &source_path,
+                &destination_path,
+            )?;
         } else if file_type.is_file() {
             fs::copy(&source_path, &destination_path)?;
         } else {
@@ -215,7 +218,8 @@ fn cloudcraft_copy_directory(
     // This avoids deleting an existing directory if a create operation races with
     // the earlier destination-existence check in the backup/restore workflow.
     fs::create_dir(destination)?;
-    if let Err(error) = cloudcraft_copy_directory_contents(source, destination) {
+    if let Err(error) = cloudcraft_copy_directory_contents(source, destination)
+    {
         let _ = fs::remove_dir_all(destination);
         return Err(error);
     }
