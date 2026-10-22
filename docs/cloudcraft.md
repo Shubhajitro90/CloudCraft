@@ -51,7 +51,7 @@ pnpm test
 
 The root package also exposes `pnpm app:dev` and `pnpm app:build`. The Tauri desktop crate is `apps/app` (`theseus_gui`); the CloudCraft validation workflow runs `cargo fmt --check --package theseus_gui` and `cargo test --package theseus_gui --no-default-features` after installing Linux build dependencies. The desktop build workflow can produce platform artifacts on supported runners. Native build dependencies differ by operating system.
 
-**Validation status for this implementation session:** repository files and package scripts were inspected through GitHub. A complete checkout with dependencies and a Rust toolchain was not available to this session, so no frontend build, lint, TypeScript check, automated test, native compile, desktop artifact build, or GUI smoke test is claimed as passing. Check the CloudCraft validation and desktop build workflows before shipping.
+**Validation record:** CloudCraft validation run [39809890925](https://github.com/Shubhajitro90/CloudCraft/actions/runs/39809890925) completed successfully on implementation commit `26248e8e1ad04cd43d3020ba2bb76dd0fc509469`: Prettier check, ESLint, Vue/TypeScript typecheck, production frontend build, `cargo fmt --check --package theseus_gui`, and `cargo test --package theseus_gui --no-default-features` all passed. The validation workflow was subsequently made read-only and given explicit path filters; its follow-up run passed the frontend checks, with the Rust job queued at the time of this note. The multi-platform desktop artifact build was still running and is not claimed as passing here. No GUI smoke test or installed-launcher test is claimed.
 
 ## Licensing
 
