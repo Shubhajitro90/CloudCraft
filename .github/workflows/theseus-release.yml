@@ -3,7 +3,6 @@ on:
   push:
     branches:
       - feature*
-      - cloudcraft-implementation
     tags:
       - 'build*'
       - 'v*'
