@@ -8,6 +8,15 @@ import { list, run } from '@/helpers/profile'
 import { get as getSettings, set as setSettings } from '@/helpers/settings'
 import { cloudSessionProvider } from '@/helpers/cloudSession'
 import { cloudStorageProvider } from '@/helpers/cloudStorage'
+import {
+  CompassIcon,
+  DownloadIcon,
+  FolderOpenIcon,
+  GlobeIcon,
+  LibraryIcon,
+  PlayIcon,
+  SettingsIcon,
+} from '@modrinth/assets'
 
 const breadcrumbs = useBreadcrumbs()
 const router = useRouter()
@@ -440,7 +449,7 @@ function addSaveNote() {
 
       <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         <button class="feature-card text-left" type="button" @click="activeSection = 'instances'">
-          <span class="feature-icon">▶</span><span class="feature-title">Play your instances</span>
+          <span class="feature-icon"><PlayIcon /></span><span class="feature-title">Play your instances</span>
           <span class="feature-copy"
             >{{ instances.length }} profile{{ instances.length === 1 ? '' : 's' }} found in your
             existing launcher library.</span
@@ -448,31 +457,31 @@ function addSaveNote() {
           <span class="feature-link">Open profiles <span aria-hidden="true">→</span></span>
         </button>
         <button class="feature-card text-left" type="button" @click="activeSection = 'mods'">
-          <span class="feature-icon">✳</span><span class="feature-title">Mods & modpacks</span>
+          <span class="feature-icon"><CompassIcon /></span><span class="feature-title">Mods & modpacks</span>
           <span class="feature-copy"
             >Browse real Modrinth content and add it through the existing launcher flow.</span
           >
           <span class="feature-link">Explore content <span aria-hidden="true">→</span></span>
         </button>
         <button class="feature-card text-left" type="button" @click="activeSection = 'servers'">
-          <span class="feature-icon">⌁</span><span class="feature-title">Server shortcuts</span>
+          <span class="feature-icon"><GlobeIcon /></span><span class="feature-title">Server shortcuts</span>
           <span class="feature-copy">Save an address for a server you already run or use.</span>
           <span class="feature-link">Manage addresses <span aria-hidden="true">→</span></span>
         </button>
         <button class="feature-card text-left" type="button" @click="activeSection = 'performance'">
-          <span class="feature-icon">↗</span><span class="feature-title">Performance</span>
+          <span class="feature-icon"><SettingsIcon /></span><span class="feature-title">Performance</span>
           <span class="feature-copy"
             >Adjust the launcher's actual Minecraft memory allocation.</span
           >
           <span class="feature-link">Tune memory <span aria-hidden="true">→</span></span>
         </button>
         <button class="feature-card text-left" type="button" @click="activeSection = 'saves'">
-          <span class="feature-icon">◇</span><span class="feature-title">Save workspace</span>
+          <span class="feature-icon"><FolderOpenIcon /></span><span class="feature-title">Save workspace</span>
           <span class="feature-copy">Keep backup reminders and export your reminder list.</span>
           <span class="feature-link">Open save tools <span aria-hidden="true">→</span></span>
         </button>
         <RouterLink class="feature-card" to="/library">
-          <span class="feature-icon">▦</span><span class="feature-title">Your instances</span>
+          <span class="feature-icon"><LibraryIcon /></span><span class="feature-title">Your instances</span>
           <span class="feature-copy"
             >Use the existing launcher library and its real installed profiles.</span
           >
@@ -625,7 +634,7 @@ function addSaveNote() {
           </article>
         </div>
         <div v-else class="empty-state">
-          <span class="feature-icon">▦</span><strong>No instances found</strong
+          <span class="feature-icon"><LibraryIcon /></span><strong>No instances found</strong
           ><span class="text-sm text-secondary"
             >Create one with the launcher's existing instance wizard.</span
           ><RouterLink class="primary-action" to="/library">Open library</RouterLink>
@@ -643,25 +652,25 @@ function addSaveNote() {
         </p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
           <RouterLink class="feature-card" to="/browse/mod"
-            ><span class="feature-icon">✳</span><span class="feature-title">Browse mods</span
+            ><span class="feature-icon"><CompassIcon /></span><span class="feature-title">Browse mods</span
             ><span class="feature-copy"
               >Find supported mods and install them to an instance using the existing flow.</span
             ><span class="feature-link">Browse mods ↗</span></RouterLink
           >
           <RouterLink class="feature-card" to="/browse/modpack"
-            ><span class="feature-icon">▦</span><span class="feature-title">Explore modpacks</span
+            ><span class="feature-icon"><LibraryIcon /></span><span class="feature-title">Explore modpacks</span
             ><span class="feature-copy"
               >Discover complete modpacks from the real content catalogue.</span
             ><span class="feature-link">Browse modpacks ↗</span></RouterLink
           >
           <RouterLink class="feature-card" to="/browse/resourcepack"
-            ><span class="feature-icon">◈</span><span class="feature-title">Resource packs</span
+            ><span class="feature-icon"><DownloadIcon /></span><span class="feature-title">Resource packs</span
             ><span class="feature-copy"
               >Find visual customizations through the existing browser.</span
             ><span class="feature-link">Browse packs ↗</span></RouterLink
           >
           <RouterLink class="feature-card" to="/browse/shader"
-            ><span class="feature-icon">✧</span><span class="feature-title">Shaders</span
+            ><span class="feature-icon"><CompassIcon /></span><span class="feature-title">Shaders</span
             ><span class="feature-copy">Discover shaders in the supported content catalogue.</span
             ><span class="feature-link">Browse shaders ↗</span></RouterLink
           >
@@ -961,7 +970,7 @@ function addSaveNote() {
           </div>
         </div>
         <div v-else class="empty-state">
-          <span class="feature-icon">◇</span><strong>No reminders yet</strong
+          <span class="feature-icon"><FolderOpenIcon /></span><strong>No reminders yet</strong
           ><span class="text-sm text-secondary"
             >Add a reminder to keep track of a manual backup.</span
           >
@@ -1165,7 +1174,10 @@ function addSaveNote() {
   border-radius: 0.8rem;
   background: rgba(167, 139, 250, 0.13);
   color: #c4b5fd;
-  font-size: 1.5rem;
+}
+.feature-icon :deep(svg) {
+  width: 1.15rem;
+  height: 1.15rem;
 }
 .feature-title {
   font-weight: 750;
