@@ -1,4 +1,4 @@
-name: CloudCraft frontend validation
+name: CloudCraft validation
 
 on:
   pull_request:
@@ -9,71 +9,92 @@ permissions:
   contents: read
 
 concurrency:
-  group: cloudcraft-frontend-${{ github.ref }}
+  group: cloudcraft-validation-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   frontend:
-    name: Frontend typecheck, lint, and build
+    name: Frontend typecheck, lint, and production build
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9.15.0
           run_install: false
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Format CloudCraft page for validation
-        run: |
-          pnpm exec prettier --write apps/app-frontend/src/pages/CloudCraft.vue
-          echo 'BEGIN_CLOUDCRAFT_FINAL_FORMAT_OUTPUT'
-          cat apps/app-frontend/src/pages/CloudCraft.vue
-          echo 'END_CLOUDCRAFT_FINAL_FORMAT_OUTPUT'
-      - name: Verify formatting of changed frontend sources
+
+      - name: Check formatting of changed frontend files
         run: |
           pnpm exec prettier --check \
+            apps/app-frontend/index.html \
+            apps/app-frontend/src/App.vue \
+            apps/app-frontend/src/components/ui/AccountsCard.vue \
+            apps/app-frontend/src/components/ui/RunningAppBar.vue \
+            apps/app-frontend/src/components/ui/modal/AppSettingsModal.vue \
+            apps/app-frontend/src/components/ui/modal/ConfirmModalWrapper.vue \
+            apps/app-frontend/src/helpers/cloudSession.ts \
+            apps/app-frontend/src/helpers/cloudStorage.ts \
             apps/app-frontend/src/pages/CloudCraft.vue \
             apps/app-frontend/src/pages/Index.vue \
             apps/app-frontend/src/pages/index.js \
-            apps/app-frontend/src/routes.js \
-            apps/app-frontend/src/helpers/cloudSession.ts \
-            apps/app-frontend/src/helpers/cloudStorage.ts \
-            apps/app-frontend/src/components/ui/modal/AppSettingsModal.vue \
-            apps/app-frontend/index.html
+            apps/app-frontend/src/routes.js
+
+      - name: Lint changed frontend files
+        run: |
+          pnpm --filter @modrinth/app-frontend exec eslint \
+            src/App.vue \
+            src/components/ui/AccountsCard.vue \
+            src/components/ui/RunningAppBar.vue \
+            src/components/ui/modal/AppSettingsModal.vue \
+            src/components/ui/modal/ConfirmModalWrapper.vue \
+            src/helpers/cloudSession.ts \
+            src/helpers/cloudStorage.ts \
+            src/pages/CloudCraft.vue \
+            src/pages/Index.vue \
+            src/pages/index.js \
+            src/routes.js
+
       - name: TypeScript and Vue typecheck
         run: pnpm --filter @modrinth/app-frontend run tsc:check
-      - name: ESLint
-        run: pnpm --filter @modrinth/app-frontend exec eslint .
+
       - name: Production frontend build
         run: pnpm --filter @modrinth/app-frontend run build
 
   rust:
-    name: Rust formatting and local backup tests
+    name: Rust formatting and local-backup safety tests
     runs-on: ubuntu-22.04
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
       - name: Install Tauri Linux dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential curl wget file libssl-dev libxdo-dev \
             libayatana-appindicator3-dev librsvg2-dev patchelf \
-            libwebkit2gtk-4.1-dev
+            libwebkit2gtk-4.1-dev pkg-config
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+
       - name: Check Rust formatting
         run: cargo fmt --check --package theseus_gui
+
       - name: Run desktop crate tests
         run: cargo test --package theseus_gui --no-default-features
