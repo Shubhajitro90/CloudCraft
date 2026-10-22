@@ -391,7 +391,7 @@ function handleAuxClick(e) {
         to="/cloudcraft"
         :is-primary="() => route.path === '/cloudcraft'"
       >
-        <ArrowBigUpDashIcon />
+        <img src="/cloudcraft.svg" alt="" class="w-5 h-5" />
       </NavButton>
       <NavButton
         v-tooltip.right="'Discover content'"
