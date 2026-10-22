@@ -3,6 +3,8 @@ name: CloudCraft validation
 on:
   pull_request:
     branches: [beta]
+  push:
+    branches: [cloudcraft-implementation]
   workflow_dispatch:
 
 permissions:
@@ -46,6 +48,7 @@ jobs:
             apps/app-frontend/src/components/ui/modal/ConfirmModalWrapper.vue \
             apps/app-frontend/src/helpers/cloudSession.ts \
             apps/app-frontend/src/helpers/cloudStorage.ts \
+            apps/app-frontend/src/helpers/update.js \
             apps/app-frontend/src/pages/CloudCraft.vue \
             apps/app-frontend/src/pages/Index.vue \
             apps/app-frontend/src/pages/index.js \
@@ -61,6 +64,7 @@ jobs:
             src/components/ui/modal/ConfirmModalWrapper.vue \
             src/helpers/cloudSession.ts \
             src/helpers/cloudStorage.ts \
+            src/helpers/update.js \
             src/pages/CloudCraft.vue \
             src/pages/Index.vue \
             src/pages/index.js \
