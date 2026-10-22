@@ -19,11 +19,18 @@ const breadcrumbs = useBreadcrumbs()
 breadcrumbs.setRootContext({ name: 'Home', link: route.path })
 
 const allInstances = ref([])
+const homeSelectedPath = ref('')
 const recentInstances = ref([])
 const launchInProgress = ref('')
 const launchError = ref('')
 const launchMessage = ref('')
-const selectedInstance = computed(() => recentInstances.value[0] || allInstances.value[0] || null)
+const selectedInstance = computed(
+  () =>
+    allInstances.value.find((instance) => instance.path === homeSelectedPath.value) ||
+    recentInstances.value[0] ||
+    allInstances.value[0] ||
+    null,
+)
 
 const offline = ref(!navigator.onLine)
 window.addEventListener('offline', () => {
@@ -50,6 +57,10 @@ const getInstances = async () => {
 
       return dateB - dateA
     })
+
+  if (!profiles.some((instance) => instance.path === homeSelectedPath.value)) {
+    homeSelectedPath.value = recentInstances.value[0]?.path || profiles[0]?.path || ''
+  }
 
   const filters = []
   for (const instance of profiles) {
@@ -146,7 +157,17 @@ onUnmounted(() => {
     </section>
     <section v-if="selectedInstance" class="selected-play-panel">
       <div class="min-w-0">
-        <p class="cloudcraft-eyebrow">YOUR MOST RECENT INSTANCE</p>
+        <p class="cloudcraft-eyebrow">YOUR SELECTED INSTANCE</p>
+        <label class="instance-picker-label" for="home-instance">Choose an instance</label>
+        <select id="home-instance" v-model="homeSelectedPath" class="home-instance-picker">
+          <option
+            v-for="instance in allInstances"
+            :key="instance.path"
+            :value="instance.path"
+          >
+            {{ instance.name || instance.path }} · {{ instance.game_version || 'version unknown' }}
+          </option>
+        </select>
         <h2 class="m-0 text-xl font-bold truncate">
           {{ selectedInstance.name || 'Minecraft instance' }}
         </h2>
@@ -250,6 +271,24 @@ onUnmounted(() => {
   font-size: 0.875rem;
   font-weight: 700;
   text-decoration: none;
+}
+.instance-picker-label {
+  display: block;
+  margin-top: 0.75rem;
+  color: var(--color-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.home-instance-picker {
+  display: block;
+  width: 100%;
+  max-width: 34rem;
+  margin-top: 0.35rem;
+  border: 1px solid var(--color-button-bg);
+  border-radius: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  background: var(--color-bg);
+  color: var(--color-contrast);
 }
 .selected-play-panel {
   display: flex;
