@@ -8,6 +8,8 @@ export const updateState = ref(false)
 export const latestBetaCommitTruncatedSha = ref('')
 export const latestBetaCommitLink = ref('')
 
+const os = ref('')
+
 // Keep update checks and download links inside the CloudCraft fork. Pointing this
 // launcher at AstralRinth's releases could install an unrelated application.
 export const launcherUrl = 'https://github.com/Shubhajitro90/CloudCraft/releases'
