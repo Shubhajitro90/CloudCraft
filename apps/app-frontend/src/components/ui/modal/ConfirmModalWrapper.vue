@@ -6,7 +6,7 @@ import { useTheming } from '@/store/theme.js'
 
 const themeStore = useTheming()
 
-const props = defineProps({
+defineProps({
   confirmationText: {
     type: String,
     default: '',
