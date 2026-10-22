@@ -101,9 +101,17 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="p-6 flex flex-col gap-2">
-    <h1 v-if="recentInstances" class="m-0 text-2xl">Welcome back!</h1>
-    <h1 v-else class="m-0 text-2xl">Welcome to AstralRinth App!</h1>
+  <div class="p-6 flex flex-col gap-5">
+    <section class="cloudcraft-welcome">
+      <div>
+        <p class="cloudcraft-eyebrow">CLOUDCRAFT LAUNCHER</p>
+        <h1 class="m-0 text-3xl font-bold">{{ recentInstances.length ? 'Welcome back.' : 'Your next world awaits.' }}</h1>
+        <p class="mt-2 mb-4 text-secondary">Your instances, modpacks, and multiplayer shortcuts — together in one place.</p>
+        <RouterLink class="cloudcraft-link" to="/cloudcraft">Open CloudCraft hub <span aria-hidden="true">↗</span></RouterLink>
+      </div>
+      <div class="cloudcraft-mark" aria-hidden="true">CC</div>
+    </section>
+    <h2 class="m-0 text-xl font-semibold">Continue your adventure</h2>
     <RowDisplay
       v-if="total > 0"
       :instances="[
@@ -131,4 +139,50 @@ onUnmounted(() => {
       :can-paginate="true"
     />
   </div>
+  <style scoped>
+.cloudcraft-welcome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: clamp(1.4rem, 3.5vw, 2.5rem);
+  border: 1px solid rgba(167, 139, 250, 0.28);
+  border-radius: 1.25rem;
+  background: radial-gradient(ellipse at 90% 15%, rgba(124, 58, 237, 0.22), transparent 42%), var(--color-bg-raised);
+}
+.cloudcraft-eyebrow {
+  margin: 0 0 .6rem;
+  color: #b59cff;
+  font-size: .7rem;
+  font-weight: 800;
+  letter-spacing: .18em;
+}
+.cloudcraft-link {
+  display: inline-flex;
+  gap: .5rem;
+  align-items: center;
+  border-radius: .75rem;
+  padding: .7rem 1rem;
+  color: white;
+  background: linear-gradient(120deg, #a78bfa, #7c3aed);
+  font-size: .875rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+.cloudcraft-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 5rem;
+  width: 5rem;
+  height: 5rem;
+  border-radius: 1.5rem;
+  color: white;
+  background: linear-gradient(135deg, #a78bfa, #6d28d9);
+  box-shadow: 0 12px 45px rgba(109, 40, 217, .3);
+  font-weight: 900;
+  font-size: 1.5rem;
+  letter-spacing: -.08em;
+}
+@media (max-width: 620px) { .cloudcraft-mark { display: none; } }
+</style>
 </template>
