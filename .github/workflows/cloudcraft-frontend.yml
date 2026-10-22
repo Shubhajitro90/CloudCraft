@@ -3,8 +3,6 @@ name: CloudCraft frontend validation
 on:
   pull_request:
     branches: [beta]
-  push:
-    branches: [cloudcraft-implementation]
   workflow_dispatch:
 
 permissions:
