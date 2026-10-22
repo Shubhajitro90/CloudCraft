@@ -12,6 +12,7 @@ This document separates working integrations from future architecture. It should
 | Mods and modpacks | Links to existing content-browser routes | Existing Modrinth-backed browser and install flow |
 | Performance | Reads and persists global min/max memory settings | Existing settings backend |
 | Server shortcuts | Stores a limited list of addresses in local browser storage; supports copying an address | Browser local storage and clipboard |
+| Local world backups | Copies a selected world directory to a chosen backup folder with a timestamped name; restores into a new directory without overwriting existing content | Tauri commands and local filesystem copy |
 | Save reminders | Stores user-entered labels/notes locally; exports reminder metadata as JSON | Browser local storage and Blob download |
 
 ## Not implemented
@@ -19,7 +20,7 @@ This document separates working integrations from future architecture. It should
 - **Cloud gaming:** no remote VM/session allocation, game streaming, input transport, provider credentials, billing/quota, or session lifecycle exists in this implementation.
 - **Hosted servers:** no provider API, server provisioning, lifecycle management, or remote server status is connected.
 - **Cloud saves:** no remote account, encrypted upload/download, conflict resolution, synchronization protocol, or recovery workflow is connected.
-- **World backups:** the reminder list does not read or copy world files and cannot restore a world.
+- **Cloud-backed saves:** no remote account, encrypted upload/download, conflict resolution, synchronization protocol, or remote recovery workflow is connected.
 - **Skins/capes:** no new system is connected.
 
 Do not label these features as live or show invented connection state. Implementing them requires choosing a real provider, reviewing its API and terms, designing credential storage and consent, adding the required backend commands, and testing failure/recovery paths.
@@ -28,7 +29,7 @@ Do not label these features as live or show invented connection state. Implement
 
 - Do not send Microsoft/Minecraft credentials, launcher tokens, local paths, or world data to a third-party service without a reviewed, explicit integration and user consent.
 - Keep secrets out of Vue state persisted to browser storage, logs, telemetry, URLs, and exported manifests.
-- Validate all file paths and archive entries in any future backup/restore feature. Restoration must avoid path traversal, overwrite surprises, symlinks, and partial writes.
+- The local backup commands require existing directories, reject source/destination overlap, reject symbolic links, avoid overwriting existing restore targets, and attempt to remove partial output after a failed copy. Close Minecraft before copying a live world. This is not a substitute for testing recovery on important worlds.
 - Treat server addresses and reminder notes as user-provided data; they are not verified or transmitted by CloudCraft.
 - Do not weaken the upstream authentication or launcher security model to simulate a cloud feature.
 
