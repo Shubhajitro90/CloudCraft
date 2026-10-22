@@ -387,6 +387,9 @@ function handleAuxClick(e) {
       <NavButton v-tooltip.right="'Home'" to="/">
         <HomeIcon />
       </NavButton>
+      <NavButton v-tooltip.right="'CloudCraft hub'" to="/cloudcraft" :is-primary="() => route.path === '/cloudcraft'">
+        <ArrowBigUpDashIcon />
+      </NavButton>
       <NavButton
         v-tooltip.right="'Discover content'"
         to="/browse/modpack"
