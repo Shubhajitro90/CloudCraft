@@ -37,6 +37,10 @@ jobs:
           echo 'BEGIN_CLOUDCRAFT_PRETTIER_OUTPUT'
           cat apps/app-frontend/src/pages/CloudCraft.vue
           echo 'END_CLOUDCRAFT_PRETTIER_OUTPUT'
+          pnpm exec prettier --write apps/app-frontend/src/pages/Index.vue
+          echo 'BEGIN_CLOUDCRAFT_INDEX_OUTPUT'
+          cat apps/app-frontend/src/pages/Index.vue
+          echo 'END_CLOUDCRAFT_INDEX_OUTPUT'
       - name: TypeScript and Vue typecheck
         run: pnpm --filter @modrinth/app-frontend run tsc:check
       - name: Lint and formatting
