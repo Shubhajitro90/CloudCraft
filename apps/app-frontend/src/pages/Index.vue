@@ -139,7 +139,9 @@ onUnmounted(() => {
       :can-paginate="true"
     />
   </div>
-  <style scoped>
+</template>
+
+<style scoped>
 .cloudcraft-welcome {
   display: flex;
   align-items: center;
@@ -185,4 +187,3 @@ onUnmounted(() => {
 }
 @media (max-width: 620px) { .cloudcraft-mark { display: none; } }
 </style>
-</template>
