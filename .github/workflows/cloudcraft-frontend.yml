@@ -31,6 +31,15 @@ jobs:
           run_install: false
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Format CloudCraft source for review
+        run: |
+          pnpm exec prettier --write apps/app-frontend/src/pages/CloudCraft.vue apps/app-frontend/src/helpers/cloudSession.ts
+          echo 'BEGIN_CLOUDCRAFT_PAGE_OUTPUT'
+          cat apps/app-frontend/src/pages/CloudCraft.vue
+          echo 'END_CLOUDCRAFT_PAGE_OUTPUT'
+          echo 'BEGIN_CLOUD_SESSION_HELPER_OUTPUT'
+          cat apps/app-frontend/src/helpers/cloudSession.ts
+          echo 'END_CLOUD_SESSION_HELPER_OUTPUT'
       - name: TypeScript and Vue typecheck
         run: pnpm --filter @modrinth/app-frontend run tsc:check
       - name: ESLint
