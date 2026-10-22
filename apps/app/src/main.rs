@@ -144,7 +144,7 @@ fn restart_app(app: tauri::AppHandle) {
     app.restart();
 }
 
-fn cloudcraft_validate_directory(path: &str, label: &str) -> Result<std::path::PathBuf, String> {
+fn cloudcraft_validate_directory(path: &str, label: &str) -> std::result::Result<std::path::PathBuf, String> {
     use std::fs;
     use std::path::Path;
 
@@ -198,7 +198,7 @@ fn cloudcraft_copy_directory(
 fn cloudcraft_backup_world_blocking(
     source_path: &str,
     backup_root: &str,
-) -> Result<String, String> {
+) -> std::result::Result<String, String> {
     use std::fs;
     use std::path::Path;
 
