@@ -39,9 +39,6 @@ jobs:
             apps/app-frontend/src/pages/index.js \
             apps/app-frontend/src/routes.js \
             apps/app-frontend/src/App.vue \
-            apps/app-frontend/src/components/ui/AccountsCard.vue \
-            apps/app-frontend/src/components/ui/RunningAppBar.vue \
-            apps/app-frontend/src/components/ui/modal/ConfirmModalWrapper.vue \
             apps/app-frontend/src/helpers/cloudSession.ts \
             apps/app-frontend/src/helpers/cloudStorage.ts \
             apps/app-frontend/index.html
