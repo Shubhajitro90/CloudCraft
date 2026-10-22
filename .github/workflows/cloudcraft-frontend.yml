@@ -31,6 +31,12 @@ jobs:
           run_install: false
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Format CloudCraft page for validation
+        run: |
+          pnpm exec prettier --write apps/app-frontend/src/pages/CloudCraft.vue
+          echo 'BEGIN_CLOUDCRAFT_FINAL_FORMAT_OUTPUT'
+          cat apps/app-frontend/src/pages/CloudCraft.vue
+          echo 'END_CLOUDCRAFT_FINAL_FORMAT_OUTPUT'
       - name: Verify formatting of changed frontend sources
         run: |
           pnpm exec prettier --check \
