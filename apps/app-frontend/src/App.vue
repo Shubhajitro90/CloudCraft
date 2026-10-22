@@ -121,7 +121,6 @@ async function setupApp() {
     feature_flags,
   } = settings
 
-
   if (default_page === 'Library') {
     await router.push('/library')
   }
@@ -149,11 +148,11 @@ async function setupApp() {
 
   initAnalytics()
   if (!telemetry) {
-    console.info("[AR] Telemetry disabled by default (Hard patched).")
+    console.info('[AR] Telemetry disabled by default (Hard patched).')
     optOutAnalytics()
   }
   if (!personalized_ads) {
-    console.info("[AR] Personalized ads disabled by default (Hard patched).")
+    console.info('[AR] Personalized ads disabled by default (Hard patched).')
   }
 
   if (dev) debugAnalytics()

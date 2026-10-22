@@ -452,7 +452,8 @@ function addSaveNote() {
 
       <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         <button class="feature-card text-left" type="button" @click="activeSection = 'instances'">
-          <span class="feature-icon"><PlayIcon /></span><span class="feature-title">Play your instances</span>
+          <span class="feature-icon"><PlayIcon /></span
+          ><span class="feature-title">Play your instances</span>
           <span class="feature-copy"
             >{{ instances.length }} profile{{ instances.length === 1 ? '' : 's' }} found in your
             existing launcher library.</span
@@ -460,31 +461,36 @@ function addSaveNote() {
           <span class="feature-link">Open profiles <span aria-hidden="true">→</span></span>
         </button>
         <button class="feature-card text-left" type="button" @click="activeSection = 'mods'">
-          <span class="feature-icon"><CompassIcon /></span><span class="feature-title">Mods & modpacks</span>
+          <span class="feature-icon"><CompassIcon /></span
+          ><span class="feature-title">Mods & modpacks</span>
           <span class="feature-copy"
             >Browse real Modrinth content and add it through the existing launcher flow.</span
           >
           <span class="feature-link">Explore content <span aria-hidden="true">→</span></span>
         </button>
         <button class="feature-card text-left" type="button" @click="activeSection = 'servers'">
-          <span class="feature-icon"><GlobeIcon /></span><span class="feature-title">Server shortcuts</span>
+          <span class="feature-icon"><GlobeIcon /></span
+          ><span class="feature-title">Server shortcuts</span>
           <span class="feature-copy">Save an address for a server you already run or use.</span>
           <span class="feature-link">Manage addresses <span aria-hidden="true">→</span></span>
         </button>
         <button class="feature-card text-left" type="button" @click="activeSection = 'performance'">
-          <span class="feature-icon"><SettingsIcon /></span><span class="feature-title">Performance</span>
+          <span class="feature-icon"><SettingsIcon /></span
+          ><span class="feature-title">Performance</span>
           <span class="feature-copy"
             >Adjust the launcher's actual Minecraft memory allocation.</span
           >
           <span class="feature-link">Tune memory <span aria-hidden="true">→</span></span>
         </button>
         <button class="feature-card text-left" type="button" @click="activeSection = 'saves'">
-          <span class="feature-icon"><FolderOpenIcon /></span><span class="feature-title">Save workspace</span>
+          <span class="feature-icon"><FolderOpenIcon /></span
+          ><span class="feature-title">Save workspace</span>
           <span class="feature-copy">Keep backup reminders and export your reminder list.</span>
           <span class="feature-link">Open save tools <span aria-hidden="true">→</span></span>
         </button>
         <RouterLink class="feature-card" to="/library">
-          <span class="feature-icon"><LibraryIcon /></span><span class="feature-title">Your instances</span>
+          <span class="feature-icon"><LibraryIcon /></span
+          ><span class="feature-title">Your instances</span>
           <span class="feature-copy"
             >Use the existing launcher library and its real installed profiles.</span
           >
@@ -655,25 +661,29 @@ function addSaveNote() {
         </p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
           <RouterLink class="feature-card" to="/browse/mod"
-            ><span class="feature-icon"><CompassIcon /></span><span class="feature-title">Browse mods</span
+            ><span class="feature-icon"><CompassIcon /></span
+            ><span class="feature-title">Browse mods</span
             ><span class="feature-copy"
               >Find supported mods and install them to an instance using the existing flow.</span
             ><span class="feature-link">Browse mods ↗</span></RouterLink
           >
           <RouterLink class="feature-card" to="/browse/modpack"
-            ><span class="feature-icon"><LibraryIcon /></span><span class="feature-title">Explore modpacks</span
+            ><span class="feature-icon"><LibraryIcon /></span
+            ><span class="feature-title">Explore modpacks</span
             ><span class="feature-copy"
               >Discover complete modpacks from the real content catalogue.</span
             ><span class="feature-link">Browse modpacks ↗</span></RouterLink
           >
           <RouterLink class="feature-card" to="/browse/resourcepack"
-            ><span class="feature-icon"><DownloadIcon /></span><span class="feature-title">Resource packs</span
+            ><span class="feature-icon"><DownloadIcon /></span
+            ><span class="feature-title">Resource packs</span
             ><span class="feature-copy"
               >Find visual customizations through the existing browser.</span
             ><span class="feature-link">Browse packs ↗</span></RouterLink
           >
           <RouterLink class="feature-card" to="/browse/shader"
-            ><span class="feature-icon"><CompassIcon /></span><span class="feature-title">Shaders</span
+            ><span class="feature-icon"><CompassIcon /></span
+            ><span class="feature-title">Shaders</span
             ><span class="feature-copy">Discover shaders in the supported content catalogue.</span
             ><span class="feature-link">Browse shaders ↗</span></RouterLink
           >
@@ -716,15 +726,9 @@ function addSaveNote() {
           <label for="memory-max">Maximum memory (MB)</label>
           <input id="memory-max" v-model="memoryMax" type="number" min="512" step="256" required />
           <div class="memory-presets">
-            <button class="secondary-action" type="button" @click="memoryMax = '4096'">
-              4 GB
-            </button>
-            <button class="secondary-action" type="button" @click="memoryMax = '6144'">
-              6 GB
-            </button>
-            <button class="secondary-action" type="button" @click="memoryMax = '8192'">
-              8 GB
-            </button>
+            <button class="secondary-action" type="button" @click="memoryMax = '4096'">4 GB</button>
+            <button class="secondary-action" type="button" @click="memoryMax = '6144'">6 GB</button>
+            <button class="secondary-action" type="button" @click="memoryMax = '8192'">8 GB</button>
           </div>
           <button
             class="primary-action self-start"

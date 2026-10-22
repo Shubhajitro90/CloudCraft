@@ -19,8 +19,7 @@ const osNames = ['macos', 'windows', 'linux']
 const macExtension = '.dmg'
 const windowsExtension = '.msi'
 const linuxExtension = '.AppImage'
-const allowedReleaseAssetPrefix =
-  'https://github.com/Shubhajitro90/CloudCraft/releases/download/'
+const allowedReleaseAssetPrefix = 'https://github.com/Shubhajitro90/CloudCraft/releases/download/'
 const blacklistedBuilds = [
   'dev',
   'nightly',
@@ -130,15 +129,9 @@ function getInstaller(extension, assets) {
   for (const asset of assets) {
     const name = String(asset.name || '')
     const url = String(asset.browser_download_url || '')
-    const isBlacklisted = blacklistedBuilds.some((prefix) =>
-      name.toLowerCase().startsWith(prefix),
-    )
+    const isBlacklisted = blacklistedBuilds.some((prefix) => name.toLowerCase().startsWith(prefix))
 
-    if (
-      name.endsWith(extension) &&
-      !isBlacklisted &&
-      url.startsWith(allowedReleaseAssetPrefix)
-    ) {
+    if (name.endsWith(extension) && !isBlacklisted && url.startsWith(allowedReleaseAssetPrefix)) {
       return { name, url }
     }
   }
