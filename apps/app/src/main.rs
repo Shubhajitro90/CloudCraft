@@ -36,8 +36,8 @@ async fn initialize_state(app: tauri::AppHandle) -> api::Result<()> {
 
     //     let update_fut = updater.check();
 
-        // tracing::info!("Initializing app state...");
-        State::init().await?;
+    // tracing::info!("Initializing app state...");
+    State::init().await?;
 
     //     let check_bar = theseus::init_loading(
     //         theseus::LoadingBarType::CheckingForUpdates,
@@ -46,8 +46,8 @@ async fn initialize_state(app: tauri::AppHandle) -> api::Result<()> {
     //     )
     //     .await?;
 
-        // tracing::info!("Checking for updates...");
-        // let update = update_fut.await;
+    // tracing::info!("Checking for updates...");
+    // let update = update_fut.await;
 
     //     drop(check_bar);
 
@@ -214,13 +214,19 @@ fn cloudcraft_backup_world_blocking(
     use std::path::Path;
 
     let source_original = Path::new(source_path);
-    let source_metadata = fs::symlink_metadata(source_original)
-        .map_err(|error| format!("Could not access the world folder: {error}"))?;
+    let source_metadata =
+        fs::symlink_metadata(source_original).map_err(|error| {
+            format!("Could not access the world folder: {error}")
+        })?;
     if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
-        return Err("Choose an existing world folder, not a file or symbolic link.".into());
+        return Err(
+            "Choose an existing world folder, not a file or symbolic link."
+                .into(),
+        );
     }
     let source = cloudcraft_validate_directory(source_path, "world folder")?;
-    let backup_root = cloudcraft_validate_directory(backup_root, "backup destination")?;
+    let backup_root =
+        cloudcraft_validate_directory(backup_root, "backup destination")?;
 
     if source == backup_root
         || source.starts_with(&backup_root)
@@ -233,11 +239,16 @@ fn cloudcraft_backup_world_blocking(
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
-        .ok_or_else(|| "The selected world folder has no valid name.".to_string())?;
+        .ok_or_else(|| {
+            "The selected world folder has no valid name.".to_string()
+        })?;
     let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
-    let destination = backup_root.join(format!("{world_name}-cloudcraft-backup-{timestamp}"));
+    let destination =
+        backup_root.join(format!("{world_name}-cloudcraft-backup-{timestamp}"));
     if destination.exists() {
-        return Err("A backup with this timestamp already exists. Try again in a moment.".into());
+        return Err(
+            "A backup with this timestamp already exists. Try again in a moment.".into(),
+        );
     }
 
     if let Err(error) = cloudcraft_copy_directory(&source, &destination) {
@@ -258,33 +269,45 @@ fn cloudcraft_restore_world_blocking(
     use std::path::Path;
 
     let backup_original = Path::new(backup_path);
-    let backup_metadata = fs::symlink_metadata(backup_original)
-        .map_err(|error| format!("Could not access the backup folder: {error}"))?;
+    let backup_metadata =
+        fs::symlink_metadata(backup_original).map_err(|error| {
+            format!("Could not access the backup folder: {error}")
+        })?;
     if backup_metadata.file_type().is_symlink() || !backup_metadata.is_dir() {
-        return Err("Choose an existing backup folder, not a file or symbolic link.".into());
+        return Err(
+            "Choose an existing backup folder, not a file or symbolic link."
+                .into(),
+        );
     }
     let backup = cloudcraft_validate_directory(backup_path, "backup folder")?;
-    let destination_parent =
-        cloudcraft_validate_directory(destination_parent, "restore destination")?;
+    let destination_parent = cloudcraft_validate_directory(
+        destination_parent,
+        "restore destination",
+    )?;
 
     if backup == destination_parent
         || backup.starts_with(&destination_parent)
         || destination_parent.starts_with(&backup)
     {
-        return Err("The backup and restore destination must be separate directories.".into());
+        return Err(
+            "The backup and restore destination must be separate directories."
+                .into(),
+        );
     }
 
     let backup_name = backup
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
-        .ok_or_else(|| "The selected backup folder has no valid name.".to_string())?;
+        .ok_or_else(|| {
+            "The selected backup folder has no valid name.".to_string()
+        })?;
     let restored_name = match backup_name.rsplit_once("-cloudcraft-backup-") {
         Some((original_name, timestamp))
             if timestamp.len() == 15
-                && timestamp
-                    .chars()
-                    .all(|character| character.is_ascii_digit() || character == '-') =>
+                && timestamp.chars().all(|character| {
+                    character.is_ascii_digit() || character == '-'
+                }) =>
         {
             original_name
         }
@@ -339,10 +362,8 @@ mod cloudcraft_backup_tests {
     use std::path::PathBuf;
 
     fn test_root() -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "cloudcraft-backup-test-{}",
-            uuid::Uuid::new_v4()
-        ))
+        std::env::temp_dir()
+            .join(format!("cloudcraft-backup-test-{}", uuid::Uuid::new_v4()))
     }
 
     #[test]
@@ -355,7 +376,8 @@ mod cloudcraft_backup_tests {
         fs::create_dir_all(&backups).unwrap();
         fs::create_dir_all(&restore_parent).unwrap();
         fs::write(world.join("level.dat"), b"world metadata").unwrap();
-        fs::write(world.join("region").join("r.0.0.mca"), b"region data").unwrap();
+        fs::write(world.join("region").join("r.0.0.mca"), b"region data")
+            .unwrap();
 
         let backup_path = cloudcraft_backup_world_blocking(
             world.to_str().unwrap(),
@@ -400,7 +422,8 @@ mod cloudcraft_backup_tests {
         fs::create_dir_all(&backup).unwrap();
         fs::create_dir_all(worlds.join("Survival")).unwrap();
         fs::write(backup.join("level.dat"), b"backup").unwrap();
-        fs::write(worlds.join("Survival").join("keep.txt"), b"keep this").unwrap();
+        fs::write(worlds.join("Survival").join("keep.txt"), b"keep this")
+            .unwrap();
 
         let result = cloudcraft_restore_world_blocking(
             backup.to_str().unwrap(),
@@ -472,7 +495,11 @@ fn main() {
                     {
                         std::env::current_dir()
                             .ok()
-                            .map(|dir| dir.join("UserData/app-window-state.json").to_string_lossy().into_owned())
+                            .map(|dir| {
+                                dir.join("UserData/app-window-state.json")
+                                    .to_string_lossy()
+                                    .into_owned()
+                            })
                             .unwrap()
                     } else {
                         "app-window-state.json".to_string()
