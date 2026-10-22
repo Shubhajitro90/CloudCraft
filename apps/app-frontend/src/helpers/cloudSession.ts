@@ -38,7 +38,8 @@ class UnconfiguredCloudSessionProvider implements CloudSessionProvider {
   async getStatus(): Promise<CloudSessionStatus> {
     return {
       state: 'unavailable',
-      message: 'Cloud gaming is not configured. Minecraft will run locally through the existing launcher.',
+      message:
+        'Cloud gaming is not configured. Minecraft will run locally through the existing launcher.',
       canStart: false,
       canStop: false,
     }
@@ -49,7 +50,9 @@ class UnconfiguredCloudSessionProvider implements CloudSessionProvider {
   }
 
   async stopSession(_sessionId: string): Promise<CloudSessionStatus> {
-    throw new Error('No cloud gaming provider is configured, so there is no remote session to stop.')
+    throw new Error(
+      'No cloud gaming provider is configured, so there is no remote session to stop.',
+    )
   }
 
   async cancelStart(): Promise<void> {
