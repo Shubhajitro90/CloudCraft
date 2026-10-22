@@ -258,6 +258,9 @@ onUnmounted(() => {
 }
 .cloudcraft-link {
   display: inline-flex;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
   gap: 0.5rem;
   align-items: center;
   border-radius: 0.75rem;
