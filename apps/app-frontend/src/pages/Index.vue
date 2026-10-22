@@ -62,11 +62,7 @@ const getInstances = async () => {
 
 async function launchSelectedInstance() {
   const instance = selectedInstance.value
-  if (
-    !instance?.path ||
-    instance.install_stage !== 'installed' ||
-    launchInProgress.value
-  ) {
+  if (!instance?.path || instance.install_stage !== 'installed' || launchInProgress.value) {
     return
   }
 
