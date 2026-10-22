@@ -1,0 +1,42 @@
+name: CloudCraft frontend validation
+
+on:
+  pull_request:
+    branches: [beta]
+  push:
+    branches: [cloudcraft-implementation]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudcraft-frontend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend typecheck, lint, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+          run_install: false
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: TypeScript and Vue typecheck
+        run: pnpm --filter @modrinth/app-frontend run tsc:check
+      - name: Lint and formatting
+        run: pnpm --filter @modrinth/app-frontend run lint
+      - name: Production frontend build
+        run: pnpm --filter @modrinth/app-frontend run build
