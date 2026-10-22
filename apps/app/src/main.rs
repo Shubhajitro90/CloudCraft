@@ -144,6 +144,170 @@ fn restart_app(app: tauri::AppHandle) {
     app.restart();
 }
 
+fn cloudcraft_validate_directory(path: &str, label: &str) -> Result<std::path::PathBuf, String> {
+    use std::fs;
+    use std::path::Path;
+
+    let requested = Path::new(path);
+    let metadata = fs::symlink_metadata(requested)
+        .map_err(|error| format!("Could not access {label}: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(format!("{label} must be an existing directory, not a symlink or file."));
+    }
+
+    requested
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve {label}: {error}"))
+}
+
+fn cloudcraft_copy_directory(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> std::io::Result<()> {
+    use std::fs;
+    use std::io::{Error, ErrorKind};
+
+    fs::create_dir(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+
+        if file_type.is_symlink() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Backup stopped because '{}' is a symbolic link.", source_path.display()),
+            ));
+        }
+
+        if file_type.is_dir() {
+            cloudcraft_copy_directory(&source_path, &destination_path)?;
+        } else if file_type.is_file() {
+            fs::copy(&source_path, &destination_path)?;
+        } else {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Backup stopped because '{}' is not a regular file or directory.", source_path.display()),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn cloudcraft_backup_world_blocking(
+    source_path: &str,
+    backup_root: &str,
+) -> Result<String, String> {
+    use std::fs;
+    use std::path::Path;
+
+    let source_original = Path::new(source_path);
+    let source_metadata = fs::symlink_metadata(source_original)
+        .map_err(|error| format!("Could not access the world folder: {error}"))?;
+    if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
+        return Err("Choose an existing world folder, not a file or symbolic link.".into());
+    }
+    let source = cloudcraft_validate_directory(source_path, "world folder")?;
+    let backup_root = cloudcraft_validate_directory(backup_root, "backup destination")?;
+
+    if source == backup_root || source.starts_with(&backup_root) || backup_root.starts_with(&source) {
+        return Err("The world folder and backup destination must be separate directories.".into());
+    }
+
+    let world_name = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| "The selected world folder has no valid name.".to_string())?;
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let destination = backup_root.join(format!("{world_name}-cloudcraft-backup-{timestamp}"));
+    if destination.exists() {
+        return Err("A backup with this timestamp already exists. Try again in a moment.".into());
+    }
+
+    if let Err(error) = cloudcraft_copy_directory(&source, &destination) {
+        let _ = fs::remove_dir_all(&destination);
+        return Err(format!("World backup failed; any partial copy was removed where possible: {error}"));
+    }
+
+    Ok(destination.to_string_lossy().into_owned())
+}
+
+fn cloudcraft_restore_world_blocking(
+    backup_path: &str,
+    destination_parent: &str,
+) -> Result<String, String> {
+    use std::fs;
+    use std::path::Path;
+
+    let backup_original = Path::new(backup_path);
+    let backup_metadata = fs::symlink_metadata(backup_original)
+        .map_err(|error| format!("Could not access the backup folder: {error}"))?;
+    if backup_metadata.file_type().is_symlink() || !backup_metadata.is_dir() {
+        return Err("Choose an existing backup folder, not a file or symbolic link.".into());
+    }
+    let backup = cloudcraft_validate_directory(backup_path, "backup folder")?;
+    let destination_parent =
+        cloudcraft_validate_directory(destination_parent, "restore destination")?;
+
+    if backup == destination_parent
+        || backup.starts_with(&destination_parent)
+        || destination_parent.starts_with(&backup)
+    {
+        return Err("The backup and restore destination must be separate directories.".into());
+    }
+
+    let backup_name = backup
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| "The selected backup folder has no valid name.".to_string())?;
+    let restored_name = match backup_name.rsplit_once("-cloudcraft-backup-") {
+        Some((original_name, timestamp))
+            if timestamp.len() == 15
+                && timestamp
+                    .chars()
+                    .all(|character| character.is_ascii_digit() || character == '-') =>
+        {
+            original_name
+        }
+        _ => backup_name,
+    };
+    let destination = destination_parent.join(restored_name);
+    if destination.exists() {
+        return Err(format!(
+            "Restore cancelled because '{}' already exists. Choose another destination or move the existing folder first.",
+            destination.display()
+        ));
+    }
+
+    if let Err(error) = cloudcraft_copy_directory(&backup, &destination) {
+        let _ = fs::remove_dir_all(&destination);
+        return Err(format!("World restore failed; any partial copy was removed where possible: {error}"));
+    }
+
+    Ok(destination.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn cloudcraft_backup_world(source_path: String, backup_root: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        cloudcraft_backup_world_blocking(&source_path, &backup_root)
+    })
+    .await
+    .map_err(|error| format!("Backup worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn cloudcraft_restore_world(backup_path: String, destination_parent: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        cloudcraft_restore_world_blocking(&backup_path, &destination_parent)
+    })
+    .await
+    .map_err(|error| format!("Restore worker failed: {error}"))?
+}
+
 // if Tauri app is called with arguments, then those arguments will be treated as commands
 // ie: deep links or filepaths for .mrpacks
 fn main() {
@@ -280,6 +444,8 @@ fn main() {
             toggle_decorations,
             show_window,
             restart_app,
+            cloudcraft_backup_world,
+            cloudcraft_restore_world,
         ]);
 
     #[cfg(target_os = "macos")]
