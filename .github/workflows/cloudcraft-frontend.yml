@@ -37,6 +37,25 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Format changed frontend files for review
+        run: |
+          pnpm exec prettier --write \
+            apps/app-frontend/src/App.vue \
+            apps/app-frontend/src/components/ui/AccountsCard.vue \
+            apps/app-frontend/src/components/ui/RunningAppBar.vue \
+            apps/app-frontend/src/pages/CloudCraft.vue
+
+      - name: Upload formatted frontend sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudcraft-prettier-output
+          if-no-files-found: error
+          path: |
+            apps/app-frontend/src/App.vue
+            apps/app-frontend/src/components/ui/AccountsCard.vue
+            apps/app-frontend/src/components/ui/RunningAppBar.vue
+            apps/app-frontend/src/pages/CloudCraft.vue
+
       - name: Check formatting of changed frontend files
         run: |
           pnpm exec prettier --check \
