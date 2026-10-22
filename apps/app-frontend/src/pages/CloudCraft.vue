@@ -331,11 +331,14 @@ async function createWorldBackup() {
     if (!backupRoot) return
     const destination = String(await invoke('cloudcraft_backup_world', { sourcePath, backupRoot }))
     const name = destination.split(/[\\/]/).filter(Boolean).pop() || 'World backup'
-    worldBackupHistory.value.unshift({
-      name,
-      path: destination,
-      createdAt: new Date().toISOString(),
-    })
+    worldBackupHistory.value = [
+      {
+        name,
+        path: destination,
+        createdAt: new Date().toISOString(),
+      },
+      ...worldBackupHistory.value,
+    ].slice(0, 50)
     backupMessage.value = `World backup created: ${destination}`
   } catch (error) {
     backupError.value = String(error?.message || error)
@@ -690,6 +693,10 @@ function addSaveNote() {
         <p class="mt-3 text-secondary">
           These values are read from and saved to the launcher's global settings. Values are in MB.
           More RAM is not always faster; leave room for Windows and other apps.
+        </p>
+        <p class="mt-2 text-sm text-secondary">
+          Java installations, default instance options, appearance, and privacy settings remain
+          available in the existing Settings dialog from the gear icon in the sidebar.
         </p>
         <div v-if="settingsLoading" class="empty-state">
           <span class="text-secondary">Loading launcher settings…</span>
