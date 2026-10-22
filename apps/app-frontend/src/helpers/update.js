@@ -18,6 +18,9 @@ const betaBranch = 'beta'
 const osNames = ['macos', 'windows', 'linux']
 const macExtension = '.dmg'
 const windowsExtension = '.msi'
+const linuxExtension = '.AppImage'
+const allowedReleaseAssetPrefix =
+  'https://github.com/Shubhajitro90/CloudCraft/releases/download/'
 const blacklistedBuilds = [
   'dev',
   'nightly',
@@ -45,7 +48,7 @@ export async function getBranches() {
     latestBetaCommitTruncatedSha.value = commit.sha.slice(0, 7)
     latestBetaCommitLink.value = commit.html_url
   } catch (error) {
-    latestBetaCommitTruncatedSha.value = error.message
+    latestBetaCommitTruncatedSha.value = String(error?.message || error)
     latestBetaCommitLink.value = undefined
     console.error(failedFetch[1], error)
   }
@@ -61,9 +64,11 @@ export async function getRemote(elementIdBool, downloadArtifactBool) {
     if (!response.ok) throw new Error(response.status)
     const data = await response.json()
     os.value = await getOS()
-    const latestRelease = String(data.name || '')
-    const localVersion = await getVersion()
-    let remoteVersion = latestRelease
+
+    const remoteVersion = normalizeVersion(data.tag_name || data.name)
+    const localVersion = normalizeVersion(await getVersion())
+    const releaseLabel = String(data.name || data.tag_name || '')
+    if (!remoteVersion) throw new Error('The latest CloudCraft release has no version tag.')
 
     if (!elementIdBool) {
       const releaseData = document.getElementById('releaseData')
@@ -71,30 +76,27 @@ export async function getRemote(elementIdBool, downloadArtifactBool) {
         console.error('Release data element not found.')
         return false
       }
-      releaseData.textContent = latestRelease
-      remoteVersion = releaseData.textContent
+      releaseData.textContent = releaseLabel
     }
 
-    if (osNames.includes(os.value.toLowerCase()) && remoteVersion.startsWith('v' + localVersion)) {
+    if (!osNames.includes(os.value.toLowerCase())) {
       updateState.value = false
       allowState.value = false
-    } else if (osNames.includes(os.value.toLowerCase()) && latestRelease) {
-      updateState.value = true
-      allowState.value = true
     } else {
-      updateState.value = false
-      allowState.value = false
+      updateState.value = remoteVersion !== localVersion
+      allowState.value = updateState.value
     }
 
     if (downloadArtifactBool) {
       installState.value = true
       try {
         const installer = getInstaller(getExtension(), data.assets || [])
-        if (installer) {
-          await getArtifact(installer[1], installer[0], os.value, true)
-        } else {
-          throw new Error('No compatible CloudCraft installer is attached to the latest release.')
+        if (!installer) {
+          throw new Error(
+            'No trusted CloudCraft installer for this operating system is attached to the latest release.',
+          )
         }
+        await getArtifact(installer.url, installer.name, os.value, true)
       } finally {
         installState.value = false
       }
@@ -104,7 +106,7 @@ export async function getRemote(elementIdBool, downloadArtifactBool) {
     console.error(failedFetch[0], error)
     if (!elementIdBool) {
       const errorData = document.getElementById('releaseData')
-      if (errorData) errorData.textContent = String(error.message || error)
+      if (errorData) errorData.textContent = String(error?.message || error)
     }
     updateState.value = false
     allowState.value = false
@@ -113,24 +115,40 @@ export async function getRemote(elementIdBool, downloadArtifactBool) {
   }
 }
 
+function normalizeVersion(version) {
+  return String(version || '')
+    .trim()
+    .replace(/^v/i, '')
+}
+
 /**
- * Find a non-development installer for the current platform.
+ * Find a non-development installer published in the CloudCraft GitHub release.
  */
-function getInstaller(osExtension, builds) {
-  if (!osExtension) return null
-  for (const build of builds) {
+function getInstaller(extension, assets) {
+  if (!extension) return null
+
+  for (const asset of assets) {
+    const name = String(asset.name || '')
+    const url = String(asset.browser_download_url || '')
     const isBlacklisted = blacklistedBuilds.some((prefix) =>
-      build.name.toLowerCase().startsWith(prefix),
+      name.toLowerCase().startsWith(prefix),
     )
-    if (build.name.endsWith(osExtension) && !isBlacklisted) {
-      return [build.name, build.browser_download_url]
+
+    if (
+      name.endsWith(extension) &&
+      !isBlacklisted &&
+      url.startsWith(allowedReleaseAssetPrefix)
+    ) {
+      return { name, url }
     }
   }
   return null
 }
 
 function getExtension() {
-  if (os.value.toLowerCase() === osNames[0]) return macExtension
-  if (os.value.toLowerCase() === osNames[1]) return windowsExtension
+  const platform = os.value.toLowerCase()
+  if (platform === osNames[0]) return macExtension
+  if (platform === osNames[1]) return windowsExtension
+  if (platform === osNames[2]) return linuxExtension
   return null
 }
