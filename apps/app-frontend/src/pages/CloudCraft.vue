@@ -183,8 +183,9 @@ async function createWorldBackup() {
     if (!sourcePath) return
     const backupRoot = await chooseDirectory('Choose a destination folder for the world backup')
     if (!backupRoot) return
-    const destination =
-      (await invoke) < string > ('cloudcraft_backup_world', { sourcePath, backupRoot })
+    const destination = String(
+      await invoke('cloudcraft_backup_world', { sourcePath, backupRoot }),
+    )
     backupMessage.value = `World backup created: ${destination}`
   } catch (error) {
     backupError.value = String(error?.message || error)
@@ -204,8 +205,9 @@ async function restoreWorldBackup() {
       'Choose the folder where the restored world should be created',
     )
     if (!destinationParent) return
-    const destination =
-      (await invoke) < string > ('cloudcraft_restore_world', { backupPath, destinationParent })
+    const destination = String(
+      await invoke('cloudcraft_restore_world', { backupPath, destinationParent }),
+    )
     backupMessage.value = `World restored to: ${destination}`
   } catch (error) {
     backupError.value = String(error?.message || error)
