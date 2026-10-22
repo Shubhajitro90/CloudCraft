@@ -1,80 +1,51 @@
-# Navigation in this README
-- [Install instructions](#install-instructions)
-- [Features](#features)
-- [Getting started](#getting-started)
-- [Disclaimer](#disclaimer)
-- [Donate](#support-our-project-crypto-wallets)
-- [App logo](#logo)
+# CloudCraft
 
-# About Project
+CloudCraft is a desktop Minecraft launcher built on the existing AstralRinth / Theseus-based codebase. It keeps the existing launcher engine and adds an original dark, violet-accented workspace for instances, content discovery, performance settings, and local multiplayer/save utilities.
 
-## AstralRinth • Empowering Your Minecraft Adventure
-Welcome to AR • Fork of Modrinth, the ultimate game launcher designed to enhance your Minecraft experience through the Modrinth platform and their API. Whether you're a graphical interface enthusiast, or a developer integrating Modrinth projects, Theseus core is your gateway to a new level of Minecraft gaming.
+> **Status:** The CloudCraft interface and launcher integrations are implemented on the `cloudcraft-implementation` branch. This is not a claim that cloud gaming or cloud storage is live. See [the implementation status](docs/cloudcraft.md) for the exact scope and validation status.
 
-## About Software
-Introducing AstralRinth, a specialized variant of Theseus dedicated to implementing offline authorization for an even more flexible and user-centric Minecraft Modrinth experience. Roam the Minecraft realms without the constraints of online authentication, thanks to AstralRinth.
+## What works today
 
-## AR • Unlocking Minecraft's Boundless Horizon
-Dive into the extraordinary world of AstralRinth, a fork of the original project with a unique focus on providing a free trial experience for Minecraft, all without the need for a license. Currently boasting:
+- **Existing launcher:** the upstream profile, installation, authentication, Java configuration, and launch systems remain the source of truth.
+- **CloudCraft hub:** a dedicated dashboard with Overview, Instances, Mods & modpacks, Performance, Servers, and Saves sections.
+- **Instances:** reads profiles from the existing launcher backend, opens a profile's existing details page, and invokes the normal launch command for installed profiles.
+- **Content discovery:** links into the existing Modrinth-backed browser for mods, modpacks, resource packs, and shaders.
+- **Performance:** reads and saves the launcher's actual global minimum/maximum memory allocation.
+- **Server shortcuts:** stores up to ten server addresses in local browser storage for convenience. It does not provision or host a server.
+- **Save reminders:** stores labels and notes locally and exports those reminders as JSON. This is not a world backup or cloud synchronization.
 
-# Install instructions
-- To install our application, you need to download a file for your operating system from our available releases or development builds • [Download variants here](https://github.com/DIDIRUS4/AstralRinth/releases)
-- After you have downloaded the required executable file or archive, then open it
+## What is not connected
 
-### Downloadable file extensions
-- `.msi` format for Windows OS system _(Supported popular latest versions of Microsoft Windows)_
-- `.dmg` format for MacOS system _(Works on Macos Ventura / Sonoma / Sequoia, but it should be works on older OS builds)_
-- `.deb` format for Linux OS systems _(Since there are quite a few distributions, we do not guarantee 
+- No remote Minecraft client / cloud gaming provider.
+- No hosted multiplayer server provider.
+- No cloud storage account, upload pipeline, or cross-device save synchronization.
+- No actual Minecraft world-folder backup or restore workflow in the CloudCraft hub.
+- No new skins/capes service.
 
-### Installation subjects
-- Builds in releases that are signed with the following prefixes are not recommended for installation and may contain errors:
-  - `dev`
-  - `nightly`
-  - `dirty`
-  - `dirty-dev`
-  - `dirty-nightly`
-  - `dirty_dev`
-  - `dirty_nightly`
-- Auto-updating takes place through parsing special versions from releases, so we also distribute clean types of `.msi, .dmg and .deb`
+These features require real integrations, explicit user consent, secure credential handling, and end-to-end testing before they can be advertised as operational.
 
-# Features
+## Development
 
-### Featured enhancement in AR
-- AstralRinth offers a range of authorization options, giving users the flexibility to log in with valid licenses or even a pirate account without auth credentials breaks (_Unlike MultiMC Cracked and similar software_). Experience Minecraft on your terms, breaking free from traditional licensing constraints (_Popular in Russian Federation_).
+The repository is a pnpm monorepo using Vue 3, TypeScript, Vite, and a Rust/Tauri desktop backend. Use the package manager version specified in the root `package.json` and the checked-in lockfile.
 
-### Easy to use
-- Using the launcher is intuitive, any user can figure it out.
+From the repository root:
 
-### Update notifies
-- We have implemented notifications about the release of new updates on our Github. The launcher can also download them for you and try to install them.
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter @modrinth/app-frontend run dev
+pnpm --filter @modrinth/app-frontend run tsc:check
+pnpm --filter @modrinth/app-frontend run lint
+pnpm --filter @modrinth/app-frontend run build
+```
 
-### Enhancements
-- Custom .SVG vectors for a personalized touch.
-- Improved compatibility for both pirate and licensed accounts.
-- Beautiful Discord RPC with random messages while playing, along with an in-game timer and AFK counter.
-- Forced disabling of statistics collection (modrinch metrics) with a hard patch from AstralRinth, ensuring it remains deactivated regardless of the configuration setting.
-- Removal of advertisements from all launcher views.
-- Optimization of packages (archives).
-- Integrated update fetching feature
+The root project also defines `pnpm app:dev`, `pnpm app:build`, `pnpm lint`, and `pnpm test`. Rust checks should be run from the actual Tauri crate directory discovered in the checkout, for example `cargo fmt --check`, `cargo test`, and `cargo check` where supported by the project's configured targets and system dependencies.
 
-# Getting Started
-To begin your AstralRinth adventure, follow these steps:
-1. **Download Your OS Version**: Head over to our [releases page](https://github.com/DIDIRUS4/AstralRinth/releases/latest) to find the right file for your operating system.
-   - **Choosing the Correct File**: Ensure you select the file that matches your OS requirements.
-   - [**How select file**](#downloadable-file-extensions)
-   - [**How select release**](#installation-subjects)
-2. **Authentication**: Log in with a valid license or, for testing, try using a pirate account to see AstralRinth in action.
-3. **Launch Minecraft**: Start your journey by launching Minecraft through AstralRinth and enjoy the adventures that await.
-   - **Choosing java installation**: The launcher will try to automatically detect the recommended JVM version for running the game, but you can configure everything in the launcher settings.
+The commands above describe the repository's configured scripts; they are not a statement that they have passed in this environment. Check the pull request's CI results before shipping a build.
 
-# Disclaimer
-- AstralRinth is a project intended for experimentation and educational purposes only. It does not endorse or support piracy, and users are encouraged to obtain valid licenses for a fully-supported Minecraft experience.
-- Users are reminded to respect licensing agreements and support the developers of Minecraft.
+## Licensing and attribution
 
-# Support our Project (Crypto Wallets)
-- BTC (Telegram): 14g6asNYzcUoaQtB8B2QGKabgEvn55wfLj
-- USDT TRC20 (Telegram): TMSmv1D5Fdf4fipUpwBCdh16WevrV45vGr
-- TONCOIN (Telegram): UQAqUJ2_hVBI6k_gPyfp_jd-1K0OS61nIFPZuJWN9BwGAvKe
+CloudCraft builds on an existing open-source launcher codebase and its dependencies. Preserve the upstream license and notices, review each dependency's license and applicable Modrinth branding/API rules, and comply with Minecraft's terms. Do not redistribute upstream assets or imply endorsement by Mojang/Microsoft or Modrinth. Consult the actual license files and dependency notices in the full repository before publishing binaries; no new license is implied by the CloudCraft rebrand.
 
-# Logo
-![ar_logo](https://github.com/DIDIRUS4/AstralRinth/assets/77334306/43d4acb0-546c-4dff-834d-83fb2ba6ad6f)
+## Project status
+
+See [docs/cloudcraft.md](docs/cloudcraft.md) for current feature boundaries, security notes, and validation requirements.
