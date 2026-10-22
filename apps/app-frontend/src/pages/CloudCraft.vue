@@ -151,7 +151,12 @@ async function loadCloudStorageStatus() {
 
 async function startCloudSession() {
   const instance = instances.value.find((item) => item.path === cloudInstancePath.value)
-  if (!instance || instance.install_stage !== 'installed' || !cloudSessionStatus.value.canStart || cloudSessionBusy.value) {
+  if (
+    !instance ||
+    instance.install_stage !== 'installed' ||
+    !cloudSessionStatus.value.canStart ||
+    cloudSessionBusy.value
+  ) {
     return
   }
 
@@ -276,6 +281,15 @@ function rememberServer() {
   }
 }
 
+function removeServerAddress(address) {
+  savedAddresses.value = savedAddresses.value.filter((item) => item !== address)
+  try {
+    localStorage.setItem('cloudcraft.server-addresses', JSON.stringify(savedAddresses.value))
+  } catch (error) {
+    console.error('Could not update server addresses locally', error)
+  }
+}
+
 async function copyAddress() {
   if (!serverAddress.value.trim()) return
   try {
@@ -306,9 +320,7 @@ async function createWorldBackup() {
     if (!sourcePath) return
     const backupRoot = await chooseDirectory('Choose a destination folder for the world backup')
     if (!backupRoot) return
-    const destination = String(
-      await invoke('cloudcraft_backup_world', { sourcePath, backupRoot }),
-    )
+    const destination = String(await invoke('cloudcraft_backup_world', { sourcePath, backupRoot }))
     const name = destination.split(/[\\/]/).filter(Boolean).pop() || 'World backup'
     worldBackupHistory.value.unshift({
       name,
@@ -485,7 +497,11 @@ function addSaveNote() {
             <h3 class="m-0 text-lg font-semibold">Cloud gaming</h3>
           </div>
           <span class="status-pill muted">
-            {{ cloudSessionStatus.state === 'unavailable' ? 'Not configured' : cloudSessionStatus.state }}
+            {{
+              cloudSessionStatus.state === 'unavailable'
+                ? 'Not configured'
+                : cloudSessionStatus.state
+            }}
           </span>
         </div>
         <p class="mt-3 text-secondary">{{ cloudSessionStatus.message }}</p>
@@ -502,7 +518,8 @@ function addSaveNote() {
               :key="instance.path"
               :value="instance.path"
             >
-              {{ instance.name || instance.path }} · {{ instance.game_version || 'version unknown' }}
+              {{ instance.name || instance.path }} ·
+              {{ instance.game_version || 'version unknown' }}
             </option>
           </select>
           <div class="flex flex-wrap gap-2">
@@ -751,10 +768,7 @@ function addSaveNote() {
             <button
               class="text-sm text-secondary hover:text-contrast"
               type="button"
-              @click="
-                savedAddresses = savedAddresses.filter((item) => item !== address)
-                localStorage.setItem('cloudcraft.server-addresses', JSON.stringify(savedAddresses))
-              "
+              @click="removeServerAddress(address)"
             >
               Remove
             </button>
@@ -847,7 +861,11 @@ function addSaveNote() {
           <div>
             <strong>
               Cloud storage:
-              {{ cloudStorageStatus.state === 'unconfigured' ? 'not configured' : cloudStorageStatus.state }}
+              {{
+                cloudStorageStatus.state === 'unconfigured'
+                  ? 'not configured'
+                  : cloudStorageStatus.state
+              }}
             </strong>
             <p class="m-0 mt-1 text-sm text-secondary">{{ cloudStorageStatus.message }}</p>
           </div>
@@ -858,7 +876,8 @@ function addSaveNote() {
           <span class="status-pill muted">{{ worldBackupHistory.length }} saved</span>
         </div>
         <p class="mt-2 text-sm text-secondary">
-          History is stored on this device and can become stale if you move or delete a backup folder.
+          History is stored on this device and can become stale if you move or delete a backup
+          folder.
         </p>
         <div v-if="worldBackupHistory.length" class="reminder-list">
           <div
@@ -868,7 +887,9 @@ function addSaveNote() {
           >
             <div class="min-w-0 flex-1">
               <strong>{{ entry.name }}</strong>
-              <p class="m-0 mt-1 text-xs text-secondary">{{ formatBackupTimestamp(entry.createdAt) }}</p>
+              <p class="m-0 mt-1 text-xs text-secondary">
+                {{ formatBackupTimestamp(entry.createdAt) }}
+              </p>
               <p class="m-0 mt-1 text-xs text-secondary break-all">{{ entry.path }}</p>
             </div>
             <button
@@ -883,7 +904,9 @@ function addSaveNote() {
         </div>
         <div v-else class="empty-state">
           <strong>No backups recorded</strong>
-          <span class="text-sm text-secondary">Backups created here will appear with their timestamp and local path.</span>
+          <span class="text-sm text-secondary"
+            >Backups created here will appear with their timestamp and local path.</span
+          >
         </div>
         <div class="divider-line"></div>
         <h3 class="m-0 text-lg font-semibold">Save reminders</h3>
