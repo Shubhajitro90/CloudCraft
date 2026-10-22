@@ -1,8 +1,12 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
+import { list, run } from '@/helpers/profile'
+import { get as getSettings, set as setSettings } from '@/helpers/settings'
 
 const breadcrumbs = useBreadcrumbs()
+const router = useRouter()
 breadcrumbs.setRootContext({ name: 'CloudCraft', link: '/cloudcraft' })
 
 const activeSection = ref('overview')
@@ -10,6 +14,17 @@ const serverAddress = ref('')
 const copied = ref(false)
 const saveName = ref('')
 const saveNotes = ref('')
+const instances = ref([])
+const instancesLoading = ref(true)
+const instanceError = ref('')
+const launchingPath = ref('')
+const launchError = ref('')
+const launcherSettings = ref(null)
+const memoryMin = ref('')
+const memoryMax = ref('')
+const settingsLoading = ref(false)
+const settingsMessage = ref('')
+const settingsError = ref('')
 function readLocalList(key) {
   try {
     const value = JSON.parse(localStorage.getItem(key) || '[]')
@@ -31,9 +46,87 @@ watch(backupHistory, (entries) => {
 
 const sections = [
   { id: 'overview', label: 'Overview' },
+  { id: 'instances', label: 'Instances' },
+  { id: 'mods', label: 'Mods & modpacks' },
+  { id: 'performance', label: 'Performance' },
   { id: 'servers', label: 'Servers' },
-  { id: 'saves', label: 'Cloud saves' },
+  { id: 'saves', label: 'Saves' },
 ]
+
+async function loadInstances() {
+  instancesLoading.value = true
+  instanceError.value = ''
+  try {
+    const profiles = await list()
+    instances.value = Array.isArray(profiles) ? profiles : Object.values(profiles || {})
+  } catch (error) {
+    instanceError.value = String(error?.message || error)
+  } finally {
+    instancesLoading.value = false
+  }
+}
+
+async function launchInstance(instance) {
+  if (!instance?.path || launchingPath.value) return
+  launchingPath.value = instance.path
+  launchError.value = ''
+  try {
+    await run(instance.path)
+  } catch (error) {
+    launchError.value = String(error?.message || error)
+  } finally {
+    launchingPath.value = ''
+  }
+}
+
+async function loadLauncherSettings() {
+  settingsLoading.value = true
+  settingsError.value = ''
+  try {
+    launcherSettings.value = await getSettings()
+    memoryMin.value = String(launcherSettings.value?.memory?.min ?? '')
+    memoryMax.value = String(launcherSettings.value?.memory?.max ?? '')
+  } catch (error) {
+    settingsError.value = String(error?.message || error)
+  } finally {
+    settingsLoading.value = false
+  }
+}
+
+async function saveMemorySettings() {
+  if (!launcherSettings.value) return
+  const min = memoryMin.value === '' ? null : Number(memoryMin.value)
+  const max = Number(memoryMax.value)
+  if ((min !== null && (!Number.isFinite(min) || min < 256)) || !Number.isFinite(max) || max < 512 || (min !== null && min > max)) {
+    settingsError.value = 'Enter valid memory values in MB. Minimum must be at least 256 MB and cannot exceed maximum.'
+    return
+  }
+  settingsLoading.value = true
+  settingsError.value = ''
+  settingsMessage.value = ''
+  try {
+    const updated = {
+      ...launcherSettings.value,
+      memory: { ...launcherSettings.value.memory, min, max },
+    }
+    await setSettings(updated)
+    launcherSettings.value = updated
+    settingsMessage.value = 'Launcher memory settings saved.'
+  } catch (error) {
+    settingsError.value = String(error?.message || error)
+  } finally {
+    settingsLoading.value = false
+  }
+}
+
+function openInstance(instance) {
+  if (instance?.path) router.push(`/instance/${encodeURIComponent(instance.path)}`)
+}
+
+onMounted(() => {
+  loadInstances()
+  loadLauncherSettings()
+})
 const hasServerAddress = computed(() => serverAddress.value.trim().length > 0)
 
 function rememberServer() {
@@ -96,10 +189,10 @@ function addSaveNote() {
           <p class="eyebrow m-0 mb-2">YOUR MINECRAFT SPACE</p>
           <h1 class="m-0 text-3xl md:text-4xl font-bold tracking-tight">CloudCraft</h1>
           <p class="mt-2 mb-0 text-secondary max-w-2xl">
-            One place to manage your play sessions, server shortcuts, and save planning.
+            Your Minecraft setup, profiles, mods, and play sessions — in one place.
           </p>
         </div>
-        <span class="status-pill"><span class="status-dot"></span> Launcher connected</span>
+        <span class="status-pill"><span class="status-dot"></span> Launcher workspace</span>
       </div>
       <nav class="section-tabs" aria-label="CloudCraft sections">
         <button v-for="section in sections" :key="section.id" type="button"
@@ -126,15 +219,30 @@ function addSaveNote() {
         <div class="hero-orbit" aria-hidden="true"><div class="orbit-ring ring-one"></div><div class="orbit-ring ring-two"></div><div class="orbit-core">CC</div><span class="orbit-star star-one">✦</span><span class="orbit-star star-two">✧</span></div>
       </section>
 
-      <section class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        <button class="feature-card text-left" type="button" @click="activeSection = 'instances'">
+          <span class="feature-icon">▶</span><span class="feature-title">Play your instances</span>
+          <span class="feature-copy">{{ instances.length }} profile{{ instances.length === 1 ? '' : 's' }} found in your existing launcher library.</span>
+          <span class="feature-link">Open profiles <span aria-hidden="true">→</span></span>
+        </button>
+        <button class="feature-card text-left" type="button" @click="activeSection = 'mods'">
+          <span class="feature-icon">✳</span><span class="feature-title">Mods & modpacks</span>
+          <span class="feature-copy">Browse real Modrinth content and add it through the existing launcher flow.</span>
+          <span class="feature-link">Explore content <span aria-hidden="true">→</span></span>
+        </button>
         <button class="feature-card text-left" type="button" @click="activeSection = 'servers'">
           <span class="feature-icon">⌁</span><span class="feature-title">Server shortcuts</span>
           <span class="feature-copy">Save an address for a server you already run or use.</span>
           <span class="feature-link">Manage addresses <span aria-hidden="true">→</span></span>
         </button>
+        <button class="feature-card text-left" type="button" @click="activeSection = 'performance'">
+          <span class="feature-icon">↗</span><span class="feature-title">Performance</span>
+          <span class="feature-copy">Adjust the launcher's actual Minecraft memory allocation.</span>
+          <span class="feature-link">Tune memory <span aria-hidden="true">→</span></span>
+        </button>
         <button class="feature-card text-left" type="button" @click="activeSection = 'saves'">
-          <span class="feature-icon">◇</span><span class="feature-title">Cloud saves</span>
-          <span class="feature-copy">Organize save notes and export a small manifest.</span>
+          <span class="feature-icon">◇</span><span class="feature-title">Save workspace</span>
+          <span class="feature-copy">Keep backup reminders and export your reminder list.</span>
           <span class="feature-link">Open save tools <span aria-hidden="true">→</span></span>
         </button>
         <RouterLink class="feature-card" to="/library">
@@ -150,6 +258,69 @@ function addSaveNote() {
           <p class="m-0 mt-1 text-sm text-secondary">Remote cloud gaming and hosted multiplayer servers need a real provider integration. Neither is presented as active until one is configured.</p>
         </div>
       </section>
+    </template>
+
+    <template v-else-if="activeSection === 'instances'">
+      <section class="content-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow m-0 mb-2">YOUR LIBRARY</p><h2 class="m-0 text-2xl font-bold">Minecraft instances</h2></div>
+          <div class="flex flex-wrap gap-2">
+            <button class="secondary-action" type="button" @click="loadInstances" :disabled="instancesLoading">Refresh</button>
+            <RouterLink class="primary-action" to="/library">Manage library ↗</RouterLink>
+          </div>
+        </div>
+        <p class="mt-3 text-secondary">These profiles come from the existing launcher backend. Launching uses the normal launcher process and account flow.</p>
+        <p v-if="instanceError" class="inline-error">{{ instanceError }}</p>
+        <p v-if="launchError" class="inline-error">{{ launchError }}</p>
+        <div v-if="instancesLoading" class="empty-state"><span class="text-secondary">Loading your real profiles…</span></div>
+        <div v-else-if="instances.length" class="instance-grid">
+          <article v-for="instance in instances" :key="instance.path" class="instance-card">
+            <div class="instance-icon">{{ (instance.name || 'M').slice(0, 1).toUpperCase() }}</div>
+            <div class="min-w-0 flex-1">
+              <h3 class="m-0 font-semibold truncate">{{ instance.name || instance.path }}</h3>
+              <p class="m-0 mt-1 text-sm text-secondary">{{ instance.loader || 'Vanilla' }} · Minecraft {{ instance.game_version || 'version unknown' }}</p>
+              <p class="m-0 mt-1 text-xs text-secondary">{{ instance.install_stage === 'installed' ? 'Ready to play' : 'Needs installation or repair' }}</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button class="primary-action" type="button" :disabled="instance.install_stage !== 'installed' || !!launchingPath" @click="launchInstance(instance)">{{ launchingPath === instance.path ? 'Launching…' : 'Play' }}</button>
+              <button class="secondary-action" type="button" @click="openInstance(instance)">Details</button>
+            </div>
+          </article>
+        </div>
+        <div v-else class="empty-state"><span class="feature-icon">▦</span><strong>No instances found</strong><span class="text-sm text-secondary">Create one with the launcher's existing instance wizard.</span><RouterLink class="primary-action" to="/library">Open library</RouterLink></div>
+      </section>
+    </template>
+
+    <template v-else-if="activeSection === 'mods'">
+      <section class="content-panel">
+        <p class="eyebrow m-0 mb-2">MODRINTH DISCOVERY</p><h2 class="m-0 text-2xl font-bold">Make Minecraft yours</h2>
+        <p class="mt-3 text-secondary">Use the launcher's existing content browser for actual project search, version compatibility, installation, and profile targeting.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
+          <RouterLink class="feature-card" to="/browse/mod"><span class="feature-icon">✳</span><span class="feature-title">Browse mods</span><span class="feature-copy">Find supported mods and install them to an instance using the existing flow.</span><span class="feature-link">Browse mods ↗</span></RouterLink>
+          <RouterLink class="feature-card" to="/browse/modpack"><span class="feature-icon">▦</span><span class="feature-title">Explore modpacks</span><span class="feature-copy">Discover complete modpacks from the real content catalogue.</span><span class="feature-link">Browse modpacks ↗</span></RouterLink>
+          <RouterLink class="feature-card" to="/browse/resourcepack"><span class="feature-icon">◈</span><span class="feature-title">Resource packs</span><span class="feature-copy">Find visual customizations through the existing browser.</span><span class="feature-link">Browse packs ↗</span></RouterLink>
+          <RouterLink class="feature-card" to="/browse/shader"><span class="feature-icon">✧</span><span class="feature-title">Shaders</span><span class="feature-copy">Discover shaders in the supported content catalogue.</span><span class="feature-link">Browse shaders ↗</span></RouterLink>
+        </div>
+      </section>
+    </template>
+
+    <template v-else-if="activeSection === 'performance'">
+      <section class="content-panel">
+        <div class="panel-heading"><div><p class="eyebrow m-0 mb-2">GAME TUNING</p><h2 class="m-0 text-2xl font-bold">Memory allocation</h2></div><span class="status-pill muted">Live launcher setting</span></div>
+        <p class="mt-3 text-secondary">These values are read from and saved to the launcher's global settings. Values are in MB. More RAM is not always faster; leave room for Windows and other apps.</p>
+        <div v-if="settingsLoading" class="empty-state"><span class="text-secondary">Loading launcher settings…</span></div>
+        <form v-else class="memory-form" @submit.prevent="saveMemorySettings">
+          <label for="memory-min">Minimum memory (MB) <span class="text-secondary">— optional</span></label>
+          <input id="memory-min" v-model="memoryMin" type="number" min="256" step="256" placeholder="Leave blank for launcher default" />
+          <label for="memory-max">Maximum memory (MB)</label>
+          <input id="memory-max" v-model="memoryMax" type="number" min="512" step="256" required />
+          <div class="memory-presets"><button class="secondary-action" type="button" @click="memoryMax = '4096'">4 GB</button><button class="secondary-action" type="button" @click="memoryMax = '6144'">6 GB</button><button class="secondary-action" type="button" @click="memoryMax = '8192'">8 GB</button></div>
+          <button class="primary-action self-start" type="submit" :disabled="settingsLoading || !launcherSettings">Save memory settings</button>
+        </form>
+        <p v-if="settingsMessage" class="success-message">{{ settingsMessage }}</p>
+        <p v-if="settingsError" class="inline-error">{{ settingsError }}</p>
+      </section>
+      <section class="notice-panel"><div class="notice-symbol">i</div><div><h3 class="m-0 text-base font-semibold">Performance without fake promises</h3><p class="m-0 mt-1 text-sm text-secondary">CloudCraft does not claim a guaranteed FPS multiplier or silently install optimization mods. Browse compatible mods and manage them through the existing Modrinth flow.</p><RouterLink class="feature-link inline-block mt-3" to="/browse/mod">Explore performance mods ↗</RouterLink></div></section>
     </template>
 
     <template v-else-if="activeSection === 'servers'">
@@ -189,7 +360,7 @@ function addSaveNote() {
 
     <template v-else>
       <section class="content-panel">
-        <div class="panel-heading"><div><p class="eyebrow m-0 mb-2">BACKUP WORKSPACE</p><h2 class="m-0 text-2xl font-bold">Cloud saves</h2></div><span class="status-pill muted">Cloud sync not connected</span></div>
+        <div class="panel-heading"><div><p class="eyebrow m-0 mb-2">BACKUP WORKSPACE</p><h2 class="m-0 text-2xl font-bold">Cloud saves</h2></div><span class="status-pill muted">Local-only reminders</span></div>
         <p class="text-secondary mt-3">Cloud storage is not configured in this build. You can keep a local list of save reminders and export that list as JSON. This is not a backup of your actual Minecraft world files.</p>
         <form class="save-form" @submit.prevent="addSaveNote">
           <label for="save-name">World or backup label</label><input id="save-name" v-model="saveName" placeholder="e.g. Survival world — before update" required />
@@ -204,7 +375,7 @@ function addSaveNote() {
         </div>
         <div v-else class="empty-state"><span class="feature-icon">◇</span><strong>No reminders yet</strong><span class="text-sm text-secondary">Add a label to start a list before you back up a world manually.</span></div>
       </section>
-      <section class="notice-panel"><div class="notice-symbol">!</div><div><h3 class="m-0 text-base font-semibold">Your world files stay yours</h3><p class="m-0 mt-1 text-sm text-secondary">This page does not read, upload, or synchronize worlds, credentials, or launcher data. A real cloud-save integration must be added and tested before sync can be enabled.</p></div></section>
+      <section class="notice-panel"><div class="notice-symbol">!</div><div><h3 class="m-0 text-base font-semibold">Your world files stay yours</h3><p class="m-0 mt-1 text-sm text-secondary">This page does not read, upload, or synchronize worlds, credentials, or launcher data. Cloud sync is not configured; the exported JSON is reminder metadata only.</p></div></section>
     </template>
   </main>
 </template>
@@ -231,6 +402,15 @@ function addSaveNote() {
 .feature-card { display: flex; flex-direction: column; gap: .65rem; min-height: 190px; padding: 1.25rem; border: 1px solid var(--color-button-bg); border-radius: 1.1rem; background: var(--color-bg-raised); text-decoration: none; color: inherit; cursor: pointer; transition: border-color .15s,transform .15s; }
 .feature-card:hover { border-color: rgba(167,139,250,.6); transform: translateY(-2px); }.feature-icon { display: grid; place-items: center; width: 2.4rem; height: 2.4rem; border-radius: .8rem; background: rgba(167,139,250,.13); color: #c4b5fd; font-size: 1.5rem; }.feature-title { font-weight: 750; }.feature-copy { color: var(--color-secondary); font-size: .85rem; line-height: 1.5; }.feature-link { color: #b59cff; font-size: .8rem; font-weight: 700; margin-top: auto; }
 .notice-panel,.provider-note { display: flex; align-items: flex-start; gap: .9rem; border: 1px solid var(--color-button-bg); border-radius: 1rem; padding: 1rem 1.2rem; background: var(--color-bg-raised); }.notice-symbol { display: grid; place-items: center; flex: 0 0 1.6rem; height: 1.6rem; border-radius: 50%; background: rgba(167,139,250,.15); color: #c4b5fd; font-weight: 800; }
+.instance-grid { display: grid; grid-template-columns: repeat(1,minmax(0,1fr)); gap: .8rem; margin-top: 1.5rem; }
+.instance-card { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; padding: 1rem; border: 1px solid var(--color-button-bg); border-radius: 1rem; background: var(--color-bg); }
+.instance-icon { display: grid; place-items: center; flex: 0 0 2.8rem; width: 2.8rem; height: 2.8rem; border-radius: .85rem; color: white; background: linear-gradient(135deg,#a78bfa,#6d28d9); font-size: 1.2rem; font-weight: 800; }
+.memory-form { display: flex; flex-direction: column; gap: .7rem; max-width: 560px; margin-top: 1.5rem; }
+.memory-form label { font-size: .85rem; font-weight: 700; }
+.memory-form input { width: 100%; box-sizing: border-box; border: 1px solid var(--color-button-bg); border-radius: .7rem; padding: .8rem .9rem; background: var(--color-bg); color: var(--color-contrast); }
+.memory-presets { display: flex; flex-wrap: wrap; gap: .5rem; margin: .25rem 0 .5rem; }
+.inline-error { color: #fca5a5; background: rgba(185,28,28,.1); border: 1px solid rgba(248,113,113,.3); border-radius: .75rem; padding: .8rem 1rem; overflow-wrap: anywhere; }
+.success-message { color: #86efac; margin-top: 1rem; }
 .content-panel { padding: clamp(1.2rem,3vw,2rem); border: 1px solid var(--color-button-bg); border-radius: 1.25rem; background: var(--color-bg-raised); }.panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .server-form,.save-form { display: flex; flex-direction: column; gap: .65rem; max-width: 760px; margin-top: 1.5rem; }.server-form label,.save-form label { font-size: .85rem; font-weight: 700; }.server-form input,.save-form input,.save-form textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--color-button-bg); border-radius: .7rem; padding: .8rem .9rem; background: var(--color-bg); color: var(--color-contrast); outline: none; }.server-form input:focus,.save-form input:focus,.save-form textarea:focus { border-color: #a78bfa; }.saved-address { margin-top: 1.5rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 1rem; border-radius: .9rem; background: var(--color-bg); border: 1px solid var(--color-button-bg); }.small-label,.definition-tag { color: #b59cff; font-size: .65rem; font-weight: 800; letter-spacing: .12em; }.provider-note { margin-top: 1.5rem; }.provider-indicator { background: #8b849a; margin-top: .35rem; flex-shrink: 0; }.definition-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; margin-top: 1.2rem; }.definition-grid > div { padding: 1rem; border-radius: .9rem; background: var(--color-bg); }
 .reminder-list { margin-top: 1.5rem; border-top: 1px solid var(--color-button-bg); }.reminder-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--color-button-bg); }.reminder-row button { border: 0; background: transparent; cursor: pointer; }.empty-state { display: flex; flex-direction: column; align-items: center; gap: .75rem; padding: 2.5rem 1rem; text-align: center; }
