@@ -19,8 +19,7 @@ CloudCraft is a desktop Minecraft launcher built on the existing AstralRinth / T
 
 - No remote Minecraft client / cloud gaming provider.
 - No hosted multiplayer server provider.
-- No cloud storage account, upload pipeline, or cross-device save synchronization.
-- No cloud-backed world backup, cross-device save synchronization, or remote restore service.
+- No cloud storage account, world uploads, cross-device save synchronization, or remote restore service.
 - No new skins/capes service.
 
 These features require real integrations, explicit user consent, secure credential handling, and end-to-end testing before they can be advertised as operational.
