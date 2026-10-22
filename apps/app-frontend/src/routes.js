@@ -19,6 +19,14 @@ export default new createRouter({
       },
     },
     {
+      path: '/cloudcraft',
+      name: 'CloudCraft',
+      component: Pages.CloudCraft,
+      meta: {
+        breadcrumb: [{ name: 'CloudCraft' }],
+      },
+    },
+    {
       path: '/browse/:projectType',
       name: 'Discover content',
       component: Pages.Browse,
