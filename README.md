@@ -40,7 +40,7 @@ pnpm --filter @modrinth/app-frontend run build
 
 The root project also defines `pnpm app:dev`, `pnpm app:build`, `pnpm lint`, and `pnpm test`. Rust checks should be run from the actual Tauri crate directory discovered in the checkout, for example `cargo fmt --check`, `cargo test`, and `cargo check` where supported by the project's configured targets and system dependencies.
 
-The commands above describe the repository's configured scripts; they are not a statement that they have passed in this environment. Check the pull request's CI results before shipping a build.
+Validation record: [CloudCraft validation run #108](https://github.com/Shubhajitro90/CloudCraft/actions/runs/39809890925) passed the frontend formatting check, ESLint, Vue/TypeScript typecheck, production frontend build, Rust formatting, and desktop-crate tests. [Desktop build run](https://github.com/Shubhajitro90/CloudCraft/actions/runs/39809890902) produced the Linux artifact successfully; Windows and macOS jobs were still running when this note was written. No GUI smoke test or installed-launcher test is claimed. Check the latest CI run before shipping.
 
 ## Licensing and attribution
 
