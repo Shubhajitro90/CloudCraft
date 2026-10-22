@@ -173,7 +173,7 @@ async function createWorldBackup() {
     if (!sourcePath) return
     const backupRoot = await chooseDirectory('Choose a destination folder for the world backup')
     if (!backupRoot) return
-    const destination = await invoke('cloudcraft_backup_world', { sourcePath, backupRoot })
+    const destination = await invoke<string>('cloudcraft_backup_world', { sourcePath, backupRoot })
     backupMessage.value = `World backup created: ${destination}`
   } catch (error) {
     backupError.value = String(error?.message || error)
@@ -191,7 +191,7 @@ async function restoreWorldBackup() {
     if (!backupPath) return
     const destinationParent = await chooseDirectory('Choose the folder where the restored world should be created')
     if (!destinationParent) return
-    const destination = await invoke('cloudcraft_restore_world', { backupPath, destinationParent })
+    const destination = await invoke<string>('cloudcraft_restore_world', { backupPath, destinationParent })
     backupMessage.value = `World restored to: ${destination}`
   } catch (error) {
     backupError.value = String(error?.message || error)
@@ -407,7 +407,7 @@ function addSaveNote() {
     <template v-else>
       <section class="content-panel">
         <div class="panel-heading"><div><p class="eyebrow m-0 mb-2">WORLD BACKUP WORKSPACE</p><h2 class="m-0 text-2xl font-bold">Saves & backups</h2></div><span class="status-pill muted">Local backups · cloud sync off</span></div>
-        <p class="text-secondary mt-3">Back up a world by copying its selected folder to a destination you choose, or restore a CloudCraft backup into a new folder. Large worlds may take a while. The launcher will not overwrite an existing world folder.</p>
+        <p class="text-secondary mt-3">Back up a world by copying its selected folder to a destination you choose, or restore a CloudCraft backup into a new folder. Close Minecraft first so the world is not changing during the copy. Large worlds may take a while. The launcher will not overwrite an existing world folder.</p>
         <div class="backup-actions">
           <button class="primary-action" type="button" :disabled="backupBusy" @click="createWorldBackup">{{ backupBusy ? 'Working…' : 'Back up a world folder' }}</button>
           <button class="secondary-action" type="button" :disabled="backupBusy" @click="restoreWorldBackup">{{ backupBusy ? 'Working…' : 'Restore a backup' }}</button>
