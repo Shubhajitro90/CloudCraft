@@ -96,7 +96,7 @@
 </template>
 
 <script setup>
-import { DropdownIcon, PlusIcon, TrashIcon, LogInIcon, PirateIcon as Offline, MicrosoftIcon as License, MicrosoftIcon, PirateIcon } from '@modrinth/assets'
+import { DropdownIcon, TrashIcon, PirateIcon as Offline, MicrosoftIcon as License, MicrosoftIcon, PirateIcon } from '@modrinth/assets'
 import { Avatar, Button, Card } from '@modrinth/ui'
 import { ref, computed, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
 import {
@@ -135,7 +135,7 @@ async function tryOfflineLogin() { // Patched
 }
 
 async function offlineLoginFinally() { // Patched
-  let name = playerName.value
+  const name = playerName.value
   if (name.length > 1 && name.length < 20 && name !== '') {
     const loggedIn = await offline_login(name).catch(handleError)
     loginOfflineModal.value.hide()
