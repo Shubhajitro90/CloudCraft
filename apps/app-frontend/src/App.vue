@@ -2,7 +2,6 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import {
-  ArrowBigUpDashIcon as UpgradeIcon,
   LogInIcon,
   HomeIcon,
   LibraryIcon,
@@ -607,7 +606,7 @@ function handleAuxClick(e) {
           class="absolute bottom-[250px] w-full flex justify-center items-center gap-1 px-4 py-3 text-purple font-medium hover:underline z-10"
           target="_blank"
         >
-          <UpgradeIcon class="text-2xl" /> Upgrade to Modrinth+
+          <ArrowBigUpDashIcon class="text-2xl" /> Upgrade to Modrinth+
         </a>
         <PromotionWrapper />
       </template> -->
