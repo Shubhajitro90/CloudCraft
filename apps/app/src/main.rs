@@ -164,14 +164,13 @@ fn cloudcraft_validate_directory(
         .map_err(|error| format!("Could not resolve {label}: {error}"))
 }
 
-fn cloudcraft_copy_directory(
+fn cloudcraft_copy_directory_contents(
     source: &std::path::Path,
     destination: &std::path::Path,
 ) -> std::io::Result<()> {
     use std::fs;
     use std::io::{Error, ErrorKind};
 
-    fs::create_dir(destination)?;
     for entry in fs::read_dir(source)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
@@ -189,7 +188,8 @@ fn cloudcraft_copy_directory(
         }
 
         if file_type.is_dir() {
-            cloudcraft_copy_directory(&source_path, &destination_path)?;
+            fs::create_dir(&destination_path)?;
+            cloudcraft_copy_directory_contents(&source_path, &destination_path)?;
         } else if file_type.is_file() {
             fs::copy(&source_path, &destination_path)?;
         } else {
@@ -202,6 +202,24 @@ fn cloudcraft_copy_directory(
             ));
         }
     }
+    Ok(())
+}
+
+fn cloudcraft_copy_directory(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> std::io::Result<()> {
+    use std::fs;
+
+    // Do not clean up the destination unless this call created it successfully.
+    // This avoids deleting an existing directory if a create operation races with
+    // the earlier destination-existence check in the backup/restore workflow.
+    fs::create_dir(destination)?;
+    if let Err(error) = cloudcraft_copy_directory_contents(source, destination) {
+        let _ = fs::remove_dir_all(destination);
+        return Err(error);
+    }
+
     Ok(())
 }
 
@@ -251,7 +269,6 @@ fn cloudcraft_backup_world_blocking(
     }
 
     if let Err(error) = cloudcraft_copy_directory(&source, &destination) {
-        let _ = fs::remove_dir_all(&destination);
         return Err(format!(
             "World backup failed; any partial copy was removed where possible: {error}"
         ));
@@ -301,17 +318,19 @@ fn cloudcraft_restore_world_blocking(
         .ok_or_else(|| {
             "The selected backup folder has no valid name.".to_string()
         })?;
-    let restored_name = match backup_name.rsplit_once("-cloudcraft-backup-") {
-        Some((original_name, timestamp))
-            if timestamp.len() == 15
+    let (restored_name, timestamp) = backup_name
+        .rsplit_once("-cloudcraft-backup-")
+        .filter(|(_, timestamp)| {
+            timestamp.len() == 15
                 && timestamp.chars().all(|character| {
                     character.is_ascii_digit() || character == '-'
-                }) =>
-        {
-            original_name
-        }
-        _ => backup_name,
-    };
+                })
+        })
+        .ok_or_else(|| {
+            "This folder is not a recognized CloudCraft backup. Choose a backup folder created by CloudCraft."
+                .to_string()
+        })?;
+    let _ = timestamp;
     let destination = destination_parent.join(restored_name);
     if destination.exists() {
         return Err(format!(
@@ -321,7 +340,6 @@ fn cloudcraft_restore_world_blocking(
     }
 
     if let Err(error) = cloudcraft_copy_directory(&backup, &destination) {
-        let _ = fs::remove_dir_all(&destination);
         return Err(format!(
             "World restore failed; any partial copy was removed where possible: {error}"
         ));
@@ -407,6 +425,25 @@ mod cloudcraft_backup_tests {
         assert_eq!(
             fs::read(restored.join("region").join("r.0.0.mca")).unwrap(),
             b"region data"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn copy_does_not_remove_an_existing_destination() {
+        let root = test_root();
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        fs::write(destination.join("keep.txt"), b"keep this").unwrap();
+
+        let result = cloudcraft_copy_directory(&source, &destination);
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read(destination.join("keep.txt")).unwrap(),
+            b"keep this"
         );
 
         fs::remove_dir_all(root).unwrap();
