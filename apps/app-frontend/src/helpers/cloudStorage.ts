@@ -87,5 +87,4 @@ class UnconfiguredCloudStorageProvider implements CloudStorageProvider {
   }
 }
 
-export const cloudStorageProvider: CloudStorageProvider =
-  new UnconfiguredCloudStorageProvider()
+export const cloudStorageProvider: CloudStorageProvider = new UnconfiguredCloudStorageProvider()
