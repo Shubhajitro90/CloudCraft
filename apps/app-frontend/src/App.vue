@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, onMounted, watch, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import {
   ArrowBigUpDashIcon,
@@ -49,7 +49,6 @@ import { get_opening_command, initialize_state } from '@/helpers/state'
 import { saveWindowState, StateFlags } from '@tauri-apps/plugin-window-state'
 import { renderString } from '@modrinth/utils'
 import { useFetch } from '@/helpers/fetch.js'
-import { check } from '@tauri-apps/plugin-updater'
 import NavButton from '@/components/ui/NavButton.vue'
 import { get as getCreds, logout, login } from '@/helpers/mr_auth.js'
 import { get_user } from '@/helpers/cache.js'
