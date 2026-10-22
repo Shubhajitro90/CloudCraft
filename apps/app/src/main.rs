@@ -87,9 +87,8 @@ async fn initialize_state(app: tauri::AppHandle) -> api::Result<()> {
     // }
 
     // #[cfg(not(feature = "updater"))]
-    // {
-        // }
-        
+    // }
+
     State::init().await?;
     tracing::info!("AstralRinth state successfully initialized.");
     let state = State::get().await?;
