@@ -237,7 +237,7 @@ fn cloudcraft_backup_world_blocking(
 fn cloudcraft_restore_world_blocking(
     backup_path: &str,
     destination_parent: &str,
-) -> Result<String, String> {
+) -> std::result::Result<String, String> {
     use std::fs;
     use std::path::Path;
 
@@ -291,7 +291,7 @@ fn cloudcraft_restore_world_blocking(
 }
 
 #[tauri::command]
-async fn cloudcraft_backup_world(source_path: String, backup_root: String) -> Result<String, String> {
+async fn cloudcraft_backup_world(source_path: String, backup_root: String) -> std::result::Result<String, String> {
     tokio::task::spawn_blocking(move || {
         cloudcraft_backup_world_blocking(&source_path, &backup_root)
     })
@@ -300,7 +300,7 @@ async fn cloudcraft_backup_world(source_path: String, backup_root: String) -> Re
 }
 
 #[tauri::command]
-async fn cloudcraft_restore_world(backup_path: String, destination_parent: String) -> Result<String, String> {
+async fn cloudcraft_restore_world(backup_path: String, destination_parent: String) -> std::result::Result<String, String> {
     tokio::task::spawn_blocking(move || {
         cloudcraft_restore_world_blocking(&backup_path, &destination_parent)
     })
