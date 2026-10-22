@@ -2,7 +2,7 @@
 import { ref, onUnmounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import RowDisplay from '@/components/RowDisplay.vue'
-import { list } from '@/helpers/profile.js'
+import { list, run } from '@/helpers/profile.js'
 import { profile_listener } from '@/helpers/events'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 import { handleError } from '@/store/notifications.js'
@@ -19,6 +19,10 @@ const breadcrumbs = useBreadcrumbs()
 breadcrumbs.setRootContext({ name: 'Home', link: route.path })
 
 const recentInstances = ref([])
+const launchInProgress = ref('')
+const launchError = ref('')
+const launchMessage = ref('')
+const selectedInstance = computed(() => recentInstances.value[0] || null)
 
 const offline = ref(!navigator.onLine)
 window.addEventListener('offline', () => {
@@ -29,16 +33,17 @@ window.addEventListener('online', () => {
 })
 
 const getInstances = async () => {
-  const profiles = await list().catch(handleError)
+  const result = await list().catch(handleError)
+  const profiles = Array.isArray(result) ? result : Object.values(result || {})
 
   recentInstances.value = profiles
-    .filter((x) => x.last_played)
+    .filter((x) => x?.last_played)
     .sort((a, b) => {
       const dateA = dayjs(a.last_played)
       const dateB = dayjs(b.last_played)
 
       if (dateA.isSame(dateB)) {
-        return a.name.localeCompare(b.name)
+        return (a.name || '').localeCompare(b.name || '')
       }
 
       return dateB - dateA
@@ -46,11 +51,35 @@ const getInstances = async () => {
 
   const filters = []
   for (const instance of profiles) {
-    if (instance.linked_data && instance.linked_data.project_id) {
+    if (instance?.linked_data?.project_id) {
       filters.push(`NOT"project_id"="${instance.linked_data.project_id}"`)
     }
   }
   filter.value = filters.join(' AND ')
+}
+
+async function launchSelectedInstance() {
+  const instance = selectedInstance.value
+  if (
+    !instance?.path ||
+    instance.install_stage !== 'installed' ||
+    launchInProgress.value
+  ) {
+    return
+  }
+
+  launchInProgress.value = instance.path
+  launchError.value = ''
+  launchMessage.value = ''
+
+  try {
+    await run(instance.path)
+    launchMessage.value = 'Launch request sent to the existing launcher.'
+  } catch (error) {
+    launchError.value = String(error?.message || error)
+  } finally {
+    launchInProgress.value = ''
+  }
 }
 
 const getFeaturedModpacks = async () => {
@@ -70,7 +99,7 @@ const getFeaturedMods = async () => {
   if (response) {
     featuredMods.value = response.result.hits
   } else {
-    featuredModpacks.value = []
+    featuredMods.value = []
   }
 }
 
@@ -116,6 +145,52 @@ onUnmounted(() => {
         >
       </div>
       <div class="cloudcraft-mark" aria-hidden="true">CC</div>
+    </section>
+    <section v-if="selectedInstance" class="selected-play-panel">
+      <div class="min-w-0">
+        <p class="cloudcraft-eyebrow">YOUR MOST RECENT INSTANCE</p>
+        <h2 class="m-0 text-xl font-bold truncate">
+          {{ selectedInstance.name || 'Minecraft instance' }}
+        </h2>
+        <p class="mt-2 mb-0 text-sm text-secondary">
+          {{ selectedInstance.loader || 'Vanilla' }} · Minecraft
+          {{ selectedInstance.game_version || 'version unknown' }}
+        </p>
+        <p class="mt-2 mb-0 text-xs text-secondary">
+          {{
+            selectedInstance.install_stage === 'installed'
+              ? 'Installed locally · ready to launch'
+              : 'This instance needs installation or repair before it can launch'
+          }}
+        </p>
+        <p v-if="launchError" class="launch-feedback error" role="alert">{{ launchError }}</p>
+        <p v-if="launchMessage" class="launch-feedback" role="status">{{ launchMessage }}</p>
+      </div>
+      <div class="play-actions">
+        <button
+          v-if="selectedInstance.install_stage === 'installed'"
+          class="cloudcraft-link"
+          type="button"
+          :disabled="!!launchInProgress"
+          @click="launchSelectedInstance"
+        >
+          {{ launchInProgress ? 'Launching…' : 'Play now' }}
+          <span aria-hidden="true">▶</span>
+        </button>
+        <RouterLink v-else class="cloudcraft-link" to="/library">Finish setup</RouterLink>
+        <RouterLink class="cloudcraft-secondary-link" to="/library">Manage instances</RouterLink>
+      </div>
+    </section>
+    <section v-else class="selected-play-panel empty-play-panel">
+      <div>
+        <p class="cloudcraft-eyebrow">LET’S GET STARTED</p>
+        <h2 class="m-0 text-xl font-bold">No recently played instance yet</h2>
+        <p class="mt-2 mb-0 text-sm text-secondary">
+          Create or install a Minecraft instance in your existing launcher library, then launch it
+          from here.
+        </p>
+      </div>
+      <RouterLink class="cloudcraft-link" to="/library">Open instance library</RouterLink>
     </section>
     <h2 class="m-0 text-xl font-semibold">Continue your adventure</h2>
     <RowDisplay
@@ -178,6 +253,44 @@ onUnmounted(() => {
   font-weight: 700;
   text-decoration: none;
 }
+.selected-play-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--color-button-bg);
+  border-radius: 1.1rem;
+  background: var(--color-bg-raised);
+}
+.empty-play-panel {
+  border-color: rgba(167, 139, 250, 0.25);
+}
+.play-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+.cloudcraft-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.cloudcraft-secondary-link {
+  color: var(--color-contrast);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+.launch-feedback {
+  margin: 0.65rem 0 0;
+  color: #86efac;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.launch-feedback.error {
+  color: #fca5a5;
+}
 .cloudcraft-mark {
   display: grid;
   place-items: center;
@@ -195,6 +308,13 @@ onUnmounted(() => {
 @media (max-width: 620px) {
   .cloudcraft-mark {
     display: none;
+  }
+  .selected-play-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .play-actions {
+    align-items: stretch;
   }
 }
 </style>
