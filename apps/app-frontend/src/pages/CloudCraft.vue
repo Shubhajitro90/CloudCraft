@@ -6,6 +6,7 @@ import { RouterLink, useRouter } from 'vue-router'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 import { list, run } from '@/helpers/profile'
 import { get as getSettings, set as setSettings } from '@/helpers/settings'
+import { cloudSessionProvider } from '@/helpers/cloudSession'
 
 const breadcrumbs = useBreadcrumbs()
 const router = useRouter()
@@ -38,6 +39,13 @@ function readLocalList(key) {
 
 const savedAddresses = ref(readLocalList('cloudcraft.server-addresses'))
 const backupHistory = ref(readLocalList('cloudcraft.save-reminders'))
+const worldBackupHistory = ref(readLocalList('cloudcraft.world-backups'))
+const cloudSessionStatus = ref({
+  state: 'unavailable',
+  message: 'Checking cloud gaming provider status…',
+  canStart: false,
+  canStop: false,
+})
 const backupBusy = ref(false)
 const backupError = ref('')
 const backupMessage = ref('')
@@ -48,6 +56,17 @@ watch(
       localStorage.setItem('cloudcraft.save-reminders', JSON.stringify(entries))
     } catch (error) {
       console.error('Could not save reminder list locally', error)
+    }
+  },
+  { deep: true },
+)
+watch(
+  worldBackupHistory,
+  (entries) => {
+    try {
+      localStorage.setItem('cloudcraft.world-backups', JSON.stringify(entries))
+    } catch (error) {
+      console.error('Could not save world backup history locally', error)
     }
   },
   { deep: true },
@@ -85,6 +104,19 @@ async function launchInstance(instance) {
     launchError.value = String(error?.message || error)
   } finally {
     launchingPath.value = ''
+  }
+}
+
+async function loadCloudSessionStatus() {
+  try {
+    cloudSessionStatus.value = await cloudSessionProvider.getStatus()
+  } catch (error) {
+    cloudSessionStatus.value = {
+      state: 'error',
+      message: String(error?.message || error),
+      canStart: false,
+      canStop: false,
+    }
   }
 }
 
@@ -141,6 +173,7 @@ function openInstance(instance) {
 onMounted(() => {
   loadInstances()
   loadLauncherSettings()
+  loadCloudSessionStatus()
 })
 const hasServerAddress = computed(() => serverAddress.value.trim().length > 0)
 
@@ -174,6 +207,11 @@ async function chooseDirectory(title) {
   return Array.isArray(selection) ? selection[0] || null : selection
 }
 
+function formatBackupTimestamp(value) {
+  const timestamp = new Date(value)
+  return Number.isNaN(timestamp.getTime()) ? 'Unknown date' : timestamp.toLocaleString()
+}
+
 async function createWorldBackup() {
   backupBusy.value = true
   backupError.value = ''
@@ -186,6 +224,12 @@ async function createWorldBackup() {
     const destination = String(
       await invoke('cloudcraft_backup_world', { sourcePath, backupRoot }),
     )
+    const name = destination.split(/[\\/]/).filter(Boolean).pop() || 'World backup'
+    worldBackupHistory.value.unshift({
+      name,
+      path: destination,
+      createdAt: new Date().toISOString(),
+    })
     backupMessage.value = `World backup created: ${destination}`
   } catch (error) {
     backupError.value = String(error?.message || error)
@@ -194,12 +238,13 @@ async function createWorldBackup() {
   }
 }
 
-async function restoreWorldBackup() {
+async function restoreWorldBackup(backupEntry = null) {
   backupBusy.value = true
   backupError.value = ''
   backupMessage.value = ''
   try {
-    const backupPath = await chooseDirectory('Choose a CloudCraft world backup folder')
+    const backupPath =
+      backupEntry?.path || (await chooseDirectory('Choose a CloudCraft world backup folder'))
     if (!backupPath) return
     const destinationParent = await chooseDirectory(
       'Choose the folder where the restored world should be created',
@@ -347,6 +392,22 @@ function addSaveNote() {
             Neither is presented as active until one is configured.
           </p>
         </div>
+      </section>
+      <section class="content-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow m-0 mb-2">REMOTE CLIENT</p>
+            <h3 class="m-0 text-lg font-semibold">Cloud gaming</h3>
+          </div>
+          <span class="status-pill muted">
+            {{ cloudSessionStatus.state === 'unavailable' ? 'Not configured' : cloudSessionStatus.state }}
+          </span>
+        </div>
+        <p class="mt-3 text-secondary">{{ cloudSessionStatus.message }}</p>
+        <p class="m-0 text-sm text-secondary">
+          The provider boundary defines unavailable, starting, ready, stopping, stopped, and error
+          states. No remote machine is started and no provider credentials are configured.
+        </p>
       </section>
     </template>
 
@@ -645,6 +706,39 @@ function addSaveNote() {
           restore stops rather than overwriting an existing directory. Keep your own additional
           copies of important worlds. No files are uploaded anywhere.
         </p>
+        <div class="divider-line"></div>
+        <div class="panel-heading">
+          <h3 class="m-0 text-lg font-semibold">Local backup history</h3>
+          <span class="status-pill muted">{{ worldBackupHistory.length }} saved</span>
+        </div>
+        <p class="mt-2 text-sm text-secondary">
+          History is stored on this device and can become stale if you move or delete a backup folder.
+        </p>
+        <div v-if="worldBackupHistory.length" class="reminder-list">
+          <div
+            v-for="entry in worldBackupHistory"
+            :key="entry.createdAt + entry.path"
+            class="reminder-row"
+          >
+            <div class="min-w-0 flex-1">
+              <strong>{{ entry.name }}</strong>
+              <p class="m-0 mt-1 text-xs text-secondary">{{ formatBackupTimestamp(entry.createdAt) }}</p>
+              <p class="m-0 mt-1 text-xs text-secondary break-all">{{ entry.path }}</p>
+            </div>
+            <button
+              class="secondary-action"
+              type="button"
+              :disabled="backupBusy"
+              @click="restoreWorldBackup(entry)"
+            >
+              Restore
+            </button>
+          </div>
+        </div>
+        <div v-else class="empty-state">
+          <strong>No backups recorded</strong>
+          <span class="text-sm text-secondary">Backups created here will appear with their timestamp and local path.</span>
+        </div>
         <div class="divider-line"></div>
         <h3 class="m-0 text-lg font-semibold">Save reminders</h3>
         <p class="text-secondary mt-2">
