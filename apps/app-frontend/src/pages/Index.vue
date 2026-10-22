@@ -160,11 +160,7 @@ onUnmounted(() => {
         <p class="cloudcraft-eyebrow">YOUR SELECTED INSTANCE</p>
         <label class="instance-picker-label" for="home-instance">Choose an instance</label>
         <select id="home-instance" v-model="homeSelectedPath" class="home-instance-picker">
-          <option
-            v-for="instance in allInstances"
-            :key="instance.path"
-            :value="instance.path"
-          >
+          <option v-for="instance in allInstances" :key="instance.path" :value="instance.path">
             {{ instance.name || instance.path }} · {{ instance.game_version || 'version unknown' }}
           </option>
         </select>
