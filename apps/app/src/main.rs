@@ -144,7 +144,10 @@ fn restart_app(app: tauri::AppHandle) {
     app.restart();
 }
 
-fn cloudcraft_validate_directory(path: &str, label: &str) -> std::result::Result<std::path::PathBuf, String> {
+fn cloudcraft_validate_directory(
+    path: &str,
+    label: &str,
+) -> std::result::Result<std::path::PathBuf, String> {
     use std::fs;
     use std::path::Path;
 
@@ -152,7 +155,9 @@ fn cloudcraft_validate_directory(path: &str, label: &str) -> std::result::Result
     let metadata = fs::symlink_metadata(requested)
         .map_err(|error| format!("Could not access {label}: {error}"))?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(format!("{label} must be an existing directory, not a symlink or file."));
+        return Err(format!(
+            "{label} must be an existing directory, not a symlink or file."
+        ));
     }
 
     requested
@@ -177,7 +182,10 @@ fn cloudcraft_copy_directory(
         if file_type.is_symlink() {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("Backup stopped because '{}' is a symbolic link.", source_path.display()),
+                format!(
+                    "Backup stopped because '{}' is a symbolic link.",
+                    source_path.display()
+                ),
             ));
         }
 
@@ -188,7 +196,10 @@ fn cloudcraft_copy_directory(
         } else {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("Backup stopped because '{}' is not a regular file or directory.", source_path.display()),
+                format!(
+                    "Backup stopped because '{}' is not a regular file or directory.",
+                    source_path.display()
+                ),
             ));
         }
     }
@@ -211,7 +222,10 @@ fn cloudcraft_backup_world_blocking(
     let source = cloudcraft_validate_directory(source_path, "world folder")?;
     let backup_root = cloudcraft_validate_directory(backup_root, "backup destination")?;
 
-    if source == backup_root || source.starts_with(&backup_root) || backup_root.starts_with(&source) {
+    if source == backup_root
+        || source.starts_with(&backup_root)
+        || backup_root.starts_with(&source)
+    {
         return Err("The world folder and backup destination must be separate directories.".into());
     }
 
@@ -228,7 +242,9 @@ fn cloudcraft_backup_world_blocking(
 
     if let Err(error) = cloudcraft_copy_directory(&source, &destination) {
         let _ = fs::remove_dir_all(&destination);
-        return Err(format!("World backup failed; any partial copy was removed where possible: {error}"));
+        return Err(format!(
+            "World backup failed; any partial copy was removed where possible: {error}"
+        ));
     }
 
     Ok(destination.to_string_lossy().into_owned())
@@ -284,14 +300,19 @@ fn cloudcraft_restore_world_blocking(
 
     if let Err(error) = cloudcraft_copy_directory(&backup, &destination) {
         let _ = fs::remove_dir_all(&destination);
-        return Err(format!("World restore failed; any partial copy was removed where possible: {error}"));
+        return Err(format!(
+            "World restore failed; any partial copy was removed where possible: {error}"
+        ));
     }
 
     Ok(destination.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
-async fn cloudcraft_backup_world(source_path: String, backup_root: String) -> std::result::Result<String, String> {
+async fn cloudcraft_backup_world(
+    source_path: String,
+    backup_root: String,
+) -> std::result::Result<String, String> {
     tokio::task::spawn_blocking(move || {
         cloudcraft_backup_world_blocking(&source_path, &backup_root)
     })
@@ -300,12 +321,99 @@ async fn cloudcraft_backup_world(source_path: String, backup_root: String) -> st
 }
 
 #[tauri::command]
-async fn cloudcraft_restore_world(backup_path: String, destination_parent: String) -> std::result::Result<String, String> {
+async fn cloudcraft_restore_world(
+    backup_path: String,
+    destination_parent: String,
+) -> std::result::Result<String, String> {
     tokio::task::spawn_blocking(move || {
         cloudcraft_restore_world_blocking(&backup_path, &destination_parent)
     })
     .await
     .map_err(|error| format!("Restore worker failed: {error}"))?
+}
+
+#[cfg(test)]
+mod cloudcraft_backup_tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn test_root() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "cloudcraft-backup-test-{}",
+            uuid::Uuid::new_v4()
+        ))
+    }
+
+    #[test]
+    fn backup_and_restore_preserve_world_files() {
+        let root = test_root();
+        let world = root.join("worlds").join("Survival");
+        let backups = root.join("backups");
+        let restore_parent = root.join("restored");
+        fs::create_dir_all(world.join("region")).unwrap();
+        fs::create_dir_all(&backups).unwrap();
+        fs::create_dir_all(&restore_parent).unwrap();
+        fs::write(world.join("level.dat"), b"world metadata").unwrap();
+        fs::write(world.join("region").join("r.0.0.mca"), b"region data").unwrap();
+
+        let backup_path = cloudcraft_backup_world_blocking(
+            world.to_str().unwrap(),
+            backups.to_str().unwrap(),
+        )
+        .unwrap();
+        let backup = PathBuf::from(&backup_path);
+        assert_eq!(
+            fs::read(backup.join("level.dat")).unwrap(),
+            b"world metadata"
+        );
+        assert_eq!(
+            fs::read(backup.join("region").join("r.0.0.mca")).unwrap(),
+            b"region data"
+        );
+
+        let restored_path = cloudcraft_restore_world_blocking(
+            &backup_path,
+            restore_parent.to_str().unwrap(),
+        )
+        .unwrap();
+        let restored = PathBuf::from(restored_path);
+        assert_eq!(restored.file_name().unwrap(), "Survival");
+        assert_eq!(
+            fs::read(restored.join("level.dat")).unwrap(),
+            b"world metadata"
+        );
+        assert_eq!(
+            fs::read(restored.join("region").join("r.0.0.mca")).unwrap(),
+            b"region data"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn restore_never_overwrites_an_existing_world() {
+        let root = test_root();
+        let backups = root.join("backups");
+        let backup = backups.join("Survival-cloudcraft-backup-20261022-123456");
+        let worlds = root.join("worlds");
+        fs::create_dir_all(&backup).unwrap();
+        fs::create_dir_all(worlds.join("Survival")).unwrap();
+        fs::write(backup.join("level.dat"), b"backup").unwrap();
+        fs::write(worlds.join("Survival").join("keep.txt"), b"keep this").unwrap();
+
+        let result = cloudcraft_restore_world_blocking(
+            backup.to_str().unwrap(),
+            worlds.to_str().unwrap(),
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read(worlds.join("Survival").join("keep.txt")).unwrap(),
+            b"keep this"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 // if Tauri app is called with arguments, then those arguments will be treated as commands
