@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 
 const breadcrumbs = useBreadcrumbs()
@@ -10,7 +10,25 @@ const serverAddress = ref('')
 const copied = ref(false)
 const saveName = ref('')
 const saveNotes = ref('')
-const backupHistory = ref([])
+function readLocalList(key) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || '[]')
+    return Array.isArray(value) ? value : []
+  } catch {
+    return []
+  }
+}
+
+const savedAddresses = ref(readLocalList('cloudcraft.server-addresses'))
+const backupHistory = ref(readLocalList('cloudcraft.save-reminders'))
+watch(backupHistory, (entries) => {
+  try {
+    localStorage.setItem('cloudcraft.save-reminders', JSON.stringify(entries))
+  } catch (error) {
+    console.error('Could not save reminder list locally', error)
+  }
+}, { deep: true })
+
 const sections = [
   { id: 'overview', label: 'Overview' },
   { id: 'servers', label: 'Servers' },
@@ -22,9 +40,10 @@ function rememberServer() {
   const address = serverAddress.value.trim()
   if (!address) return
   try {
-    const saved = JSON.parse(localStorage.getItem('cloudcraft.server-addresses') || '[]')
-    if (!saved.includes(address)) saved.unshift(address)
-    localStorage.setItem('cloudcraft.server-addresses', JSON.stringify(saved.slice(0, 10)))
+    if (!savedAddresses.value.includes(address)) {
+      savedAddresses.value = [address, ...savedAddresses.value].slice(0, 10)
+      localStorage.setItem('cloudcraft.server-addresses', JSON.stringify(savedAddresses.value))
+    }
     serverAddress.value = address
   } catch (error) {
     console.error('Could not save server address locally', error)
@@ -144,6 +163,15 @@ function addSaveNote() {
             <button class="primary-action" type="submit" :disabled="!hasServerAddress">Save address</button>
           </div>
         </form>
+        <div v-if="savedAddresses.length" class="reminder-list">
+          <div v-for="address in savedAddresses" :key="address" class="reminder-row">
+            <button class="text-left flex-1 min-w-0" type="button" @click="serverAddress = address">
+              <strong class="break-all">{{ address }}</strong>
+              <span class="block text-xs text-secondary mt-1">Saved on this device</span>
+            </button>
+            <button class="text-sm text-secondary hover:text-contrast" type="button" @click="savedAddresses = savedAddresses.filter(item => item !== address); localStorage.setItem('cloudcraft.server-addresses', JSON.stringify(savedAddresses))">Remove</button>
+          </div>
+        </div>
         <div v-if="hasServerAddress" class="saved-address">
           <div><span class="small-label">CURRENT ADDRESS</span><p class="m-0 mt-1 font-semibold break-all">{{ serverAddress.trim() }}</p></div>
           <button class="secondary-action" type="button" @click="copyAddress">{{ copied ? 'Copied!' : 'Copy address' }}</button>
