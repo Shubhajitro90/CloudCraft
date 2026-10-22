@@ -40,6 +40,7 @@ jobs:
             apps/app-frontend/src/routes.js \
             apps/app-frontend/src/helpers/cloudSession.ts \
             apps/app-frontend/src/helpers/cloudStorage.ts \
+            apps/app-frontend/src/components/ui/modal/AppSettingsModal.vue \
             apps/app-frontend/index.html
       - name: TypeScript and Vue typecheck
         run: pnpm --filter @modrinth/app-frontend run tsc:check
