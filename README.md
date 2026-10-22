@@ -12,14 +12,15 @@ CloudCraft is a desktop Minecraft launcher built on the existing AstralRinth / T
 - **Content discovery:** links into the existing Modrinth-backed browser for mods, modpacks, resource packs, and shaders.
 - **Performance:** reads and saves the launcher's actual global minimum/maximum memory allocation.
 - **Server shortcuts:** stores up to ten server addresses in local browser storage for convenience. It does not provision or host a server.
-- **Save reminders:** stores labels and notes locally and exports those reminders as JSON. This is not a world backup or cloud synchronization.
+- **Local world backups:** copies a selected world folder into a backup directory you choose and restores a backup into a new folder. Existing folders are never overwritten; symbolic links are rejected.
+- **Save reminders:** stores labels and notes locally and exports those reminders as JSON. This metadata export is not cloud synchronization.
 
 ## What is not connected
 
 - No remote Minecraft client / cloud gaming provider.
 - No hosted multiplayer server provider.
 - No cloud storage account, upload pipeline, or cross-device save synchronization.
-- No actual Minecraft world-folder backup or restore workflow in the CloudCraft hub.
+- No cloud-backed world backup, cross-device save synchronization, or remote restore service.
 - No new skins/capes service.
 
 These features require real integrations, explicit user consent, secure credential handling, and end-to-end testing before they can be advertised as operational.
