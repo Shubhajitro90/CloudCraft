@@ -611,7 +611,9 @@ function addSaveNote() {
                 <h3 class="m-0 text-lg font-semibold">Kaggle Compute</h3>
                 <p class="m-0 mt-1 text-sm text-secondary">Potential remote runtime</p>
               </div>
-              <span class="connection-state"><span class="connection-dot disconnected"></span>Not connected</span>
+              <span class="connection-state">
+                <span class="connection-dot disconnected"></span>Not connected
+              </span>
             </div>
             <p class="mt-4 text-sm text-secondary">
               Official Kaggle APIs support notebook-related operations and OAuth 2.0 for registered
@@ -619,7 +621,9 @@ function addSaveNote() {
               service. CloudCraft has no registered OAuth client or verified remote game runtime yet.
             </p>
             <ul class="provider-facts">
-              <li>Authentication: requires a registered OAuth client or a securely handled API token.</li>
+              <li>
+                Authentication: requires a registered OAuth client or a securely handled API token.
+              </li>
               <li>Compute: notebook runtime availability and limits are controlled by Kaggle.</li>
               <li>Game streaming: not available in this build.</li>
             </ul>
@@ -628,13 +632,17 @@ function addSaveNote() {
               href="https://www.kaggle.com/docs/api"
               target="_blank"
               rel="noopener noreferrer"
-            >Open Kaggle API documentation ↗</a>
+            >
+              Open Kaggle API documentation ↗
+            </a>
             <a
               class="provider-text-link"
               href="https://www.kaggle.com/account"
               target="_blank"
               rel="noopener noreferrer"
-            >Open Kaggle account settings ↗</a>
+            >
+              Open Kaggle account settings ↗
+            </a>
           </article>
           <article class="provider-card">
             <div class="provider-card-heading">
@@ -643,7 +651,9 @@ function addSaveNote() {
                 <h3 class="m-0 text-lg font-semibold">TeraBox Storage</h3>
                 <p class="m-0 mt-1 text-sm text-secondary">Potential world-backup storage</p>
               </div>
-              <span class="connection-state"><span class="connection-dot disconnected"></span>Not connected</span>
+              <span class="connection-state">
+                <span class="connection-dot disconnected"></span>Not connected
+              </span>
             </div>
             <p class="mt-4 text-sm text-secondary">
               CloudCraft can only connect through a supported TeraBox integration. The official
@@ -660,13 +670,17 @@ function addSaveNote() {
               href="https://www.terabox.com/integrations/docs?lang=en"
               target="_blank"
               rel="noopener noreferrer"
-            >Open TeraBox integration docs ↗</a>
+            >
+              Open TeraBox integration docs ↗
+            </a>
             <a
               class="provider-text-link"
               href="https://teraabox.com/developers"
               target="_blank"
               rel="noopener noreferrer"
-            >Open TeraBox developer portal ↗</a>
+            >
+              Open TeraBox developer portal ↗
+            </a>
           </article>
         </div>
       </section>
