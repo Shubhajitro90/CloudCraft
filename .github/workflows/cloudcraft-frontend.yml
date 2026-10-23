@@ -30,6 +30,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  # Validation must never write generated files or credentials back to the repository.
   contents: read
 
 concurrency:
