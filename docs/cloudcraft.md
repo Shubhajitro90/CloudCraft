@@ -7,7 +7,8 @@ This document separates working integrations from future architecture. It should
 | Area | Current behavior | Source of truth |
 | --- | --- | --- |
 | Home | CloudCraft-branded welcome panel, selected-instance launch area, recent-instance and content rows | Existing launcher/profile and content helpers |
-| Navigation | CloudCraft route and sidebar entry | Vue router and app shell |
+| Navigation | CloudCraft route and sidebar entry; Cloud connections section in the CloudCraft hub | Vue router, app shell, and hub section state |
+| Cloud connections UI | Shows Kaggle compute and TeraBox storage cards, provider documentation/account links, and explicit disconnected status. It does not claim authentication or account quota is verified | CloudCraft hub; informational UI only |
 | Instances | Loads profiles through the existing profile API; Details opens the profile route; Play invokes the existing launch command only for installed profiles | Existing Rust/Tauri launcher commands |
 | Mods and modpacks | Links to the existing content-browser routes | Existing Modrinth-backed browser and install flow |
 | Performance | Reads and persists global min/max memory settings, validates integer bounds, and re-reads settings before saving to avoid overwriting unrelated updates | Existing settings backend |
@@ -20,13 +21,13 @@ This document separates working integrations from future architecture. It should
 
 ## Not implemented
 
-- **Cloud gaming:** no remote VM/session allocation, game streaming, input transport, provider credentials, billing/quota, or session lifecycle exists in this implementation.
+- **Cloud gaming:** no remote VM/session allocation, game streaming, input transport, provider credentials, billing/quota, or session lifecycle exists in this implementation. The Cloud tab is informational and does not log in to Kaggle.
 - **Hosted servers:** no provider API, server provisioning, lifecycle management, or remote server status is connected.
-- **Cloud saves:** the typed `cloudStorageProvider` interface defines status, backup listing, upload/download progress, deletion, and cancellation. No remote account, encrypted transfer, conflict resolution, synchronization protocol, or recovery workflow is connected; all provider operations remain unavailable until a real integration is reviewed and tested.
+- **Cloud saves:** the typed `cloudStorageProvider` interface defines status, backup listing, upload/download progress, deletion, and cancellation. The Cloud tab links to TeraBox's official integration documentation, but no remote account login, app credentials, encrypted transfer, conflict resolution, synchronization protocol, or recovery workflow is connected; all provider operations remain unavailable until a real integration is reviewed and tested.
 - **Skins/capes:** no new system is connected.
 - **Self-updating releases:** CloudCraft's update check no longer points at AstralRinth installers. Until a CloudCraft release with signed, platform-appropriate installers is published, automatic update installation is not available. Do not publish an installer until signing, update metadata, and recovery have been tested.
 
-Do not label these features as live or show invented connection state. Implementing them requires choosing a real provider, reviewing its API and terms, designing credential storage and consent, adding the required backend commands, and testing failure/recovery paths.
+Do not label these features as live or show invented connection state. Kaggle documents OAuth 2.0 for registered third-party apps and its public API, but a registered CloudCraft OAuth client and a supported interactive game runtime are not present. TeraBox's official Open Platform also requires a registered application and authorization. Implementing these features requires provider app registration, secure desktop OAuth callbacks/token storage, backend API clients, reviewing provider terms, explicit consent, and testing failure/recovery paths. The Cloud tab intentionally shows both providers as disconnected until real authentication and capability checks succeed.
 
 ## Security and privacy notes
 
