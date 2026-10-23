@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { RouterLink, useRouter } from 'vue-router'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
-import { list, run } from '@/helpers/profile'
+import { install as installProfile, list, run } from '@/helpers/profile'
 import { get as getSettings, set as setSettings } from '@/helpers/settings'
 import { cloudSessionProvider } from '@/helpers/cloudSession'
 import { cloudStorageProvider } from '@/helpers/cloudStorage'
@@ -41,6 +41,9 @@ const cloudStorageStatus = ref({
 })
 const instanceError = ref('')
 const launchingPath = ref('')
+const installingPath = ref('')
+const installError = ref('')
+const installMessage = ref('')
 const launchError = ref('')
 const launcherSettings = ref(null)
 const memoryMin = ref('')
@@ -129,6 +132,26 @@ async function launchInstance(instance) {
     launchError.value = String(error?.message || error)
   } finally {
     launchingPath.value = ''
+  }
+}
+
+async function installInstance(instance) {
+  if (!instance?.path || installingPath.value || launchingPath.value) return
+  installingPath.value = instance.path
+  installError.value = ''
+  installMessage.value = ''
+  try {
+    await installProfile(instance.path, false)
+    await loadInstances()
+    const refreshed = instances.value.find((item) => item.path === instance.path)
+    installMessage.value =
+      refreshed?.install_stage === 'installed'
+        ? `${refreshed.name || 'Instance'} is installed and ready to play.`
+        : 'Installation finished. Check the instance status or open its details for more information.'
+  } catch (error) {
+    installError.value = String(error?.message || error)
+  } finally {
+    installingPath.value = ''
   }
 }
 
@@ -739,8 +762,10 @@ function addSaveNote() {
           These profiles come from the existing launcher backend. Launching uses the normal launcher
           process and account flow.
         </p>
-        <p v-if="instanceError" class="inline-error">{{ instanceError }}</p>
-        <p v-if="launchError" class="inline-error">{{ launchError }}</p>
+        <p v-if="instanceError" class="inline-error" role="alert">{{ instanceError }}</p>
+        <p v-if="installError" class="inline-error" role="alert">{{ installError }}</p>
+        <p v-if="launchError" class="inline-error" role="alert">{{ launchError }}</p>
+        <p v-if="installMessage" class="success-message" role="status">{{ installMessage }}</p>
         <div v-if="instancesLoading" class="empty-state">
           <span class="text-secondary">Loading your real profiles…</span>
         </div>
@@ -763,12 +788,22 @@ function addSaveNote() {
             </div>
             <div class="flex flex-wrap gap-2">
               <button
+                v-if="instance.install_stage === 'installed'"
                 class="primary-action"
                 type="button"
-                :disabled="instance.install_stage !== 'installed' || !!launchingPath"
+                :disabled="!!launchingPath || !!installingPath"
                 @click="launchInstance(instance)"
               >
                 {{ launchingPath === instance.path ? 'Launching…' : 'Play' }}
+              </button>
+              <button
+                v-else
+                class="primary-action"
+                type="button"
+                :disabled="!!installingPath || !!launchingPath"
+                @click="installInstance(instance)"
+              >
+                {{ installingPath === instance.path ? 'Installing…' : 'Install / repair' }}
               </button>
               <button class="secondary-action" type="button" @click="openInstance(instance)">
                 Details
