@@ -9,7 +9,7 @@ This document separates working integrations from future architecture. It should
 | Home | CloudCraft-branded welcome panel, selected-instance launch area, recent-instance and content rows | Existing launcher/profile and content helpers |
 | Navigation | CloudCraft route and sidebar entry; Cloud connections section in the CloudCraft hub | Vue router, app shell, and hub section state |
 | Cloud connections UI | Shows Kaggle compute and TeraBox storage cards, provider documentation/account links, and explicit disconnected status. It does not claim authentication or account quota is verified | CloudCraft hub; informational UI only |
-| Instances | Loads profiles through the existing profile API; Details opens the profile route; Play invokes the existing launch command only for installed profiles | Existing Rust/Tauri launcher commands |
+| Instances | Loads profiles through the existing profile API; installed profiles can Play; non-installed profiles can Install/repair with the existing profile installation API; Details opens the profile route. Errors and completion are surfaced in the UI | Existing Rust/Tauri launcher commands |
 | Mods and modpacks | Links to the existing content-browser routes | Existing Modrinth-backed browser and install flow |
 | Performance | Reads and persists global min/max memory settings, validates integer bounds, and re-reads settings before saving to avoid overwriting unrelated updates | Existing settings backend |
 | Server shortcuts | Stores a limited list of addresses in local browser storage; supports selecting, copying, and removing saved addresses | Browser local storage and clipboard |
