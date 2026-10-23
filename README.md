@@ -7,7 +7,8 @@ CloudCraft is a desktop Minecraft launcher built on the existing AstralRinth / T
 ## What works today
 
 - **Existing launcher:** the upstream profile, installation, authentication, Java configuration, and launch systems remain the source of truth.
-- **CloudCraft hub:** a dedicated dashboard with Overview, Instances, Mods & modpacks, Performance, Servers, and Saves sections.
+- **CloudCraft hub:** a dedicated dashboard with Overview, Cloud, Instances, Mods & modpacks, Performance, Servers, and Saves sections.
+- **Cloud connection setup:** an informational Cloud tab for Kaggle compute and TeraBox storage with official documentation links and honest disconnected status. Provider login, remote game streaming, and cloud-save sync are not yet connected.
 - **Instances:** reads profiles from the existing launcher backend, opens a profile's existing details page, and invokes the normal launch command for installed profiles.
 - **Content discovery:** links into the existing Modrinth-backed browser for mods, modpacks, resource packs, and shaders.
 - **Performance:** reads and saves the launcher's actual global minimum/maximum memory allocation.
