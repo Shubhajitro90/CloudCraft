@@ -509,7 +509,9 @@ function addSaveNote() {
         <button class="feature-card text-left" type="button" @click="activeSection = 'cloud'">
           <span class="feature-icon">☁</span>
           <span class="feature-title">Cloud connections</span>
-          <span class="feature-copy">Manage Kaggle compute and TeraBox storage connection setup.</span>
+          <span class="feature-copy"
+            >Manage Kaggle compute and TeraBox storage connection setup.</span
+          >
           <span class="feature-link">Open cloud <span aria-hidden="true">→</span></span>
         </button>
         <button class="feature-card text-left" type="button" @click="activeSection = 'saves'">
