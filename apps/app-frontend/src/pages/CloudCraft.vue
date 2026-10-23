@@ -624,9 +624,9 @@ function addSaveNote() {
           <span class="status-pill muted">2 providers · setup required</span>
         </div>
         <p class="mt-3 text-secondary">
-          CloudCraft separates remote compute from file storage. Kaggle may provide notebook compute;
-          TeraBox is a storage service. Neither connection is active until a supported authentication
-          flow is configured and verified.
+          CloudCraft separates remote compute from file storage. Kaggle may provide notebook
+          compute; TeraBox is a storage service. Neither connection is active until a supported
+          authentication flow is configured and verified.
         </p>
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-5">
           <article class="provider-card">
@@ -642,8 +642,9 @@ function addSaveNote() {
             </div>
             <p class="mt-4 text-sm text-secondary">
               Official Kaggle APIs support notebook-related operations and OAuth 2.0 for registered
-              third-party apps. That does not by itself provide a supported interactive game-streaming
-              service. CloudCraft has no registered OAuth client or verified remote game runtime yet.
+              third-party apps. That does not by itself provide a supported interactive
+              game-streaming service. CloudCraft has no registered OAuth client or verified remote
+              game runtime yet.
             </p>
             <ul class="provider-facts">
               <li>
@@ -681,9 +682,9 @@ function addSaveNote() {
               </span>
             </div>
             <p class="mt-4 text-sm text-secondary">
-              CloudCraft can only connect through a supported TeraBox integration. The official
-              Open Platform requires an application to be registered and authorized; this project
-              does not currently have the required app credentials or a verified upload/download client.
+              CloudCraft can only connect through a supported TeraBox integration. The official Open
+              Platform requires an application to be registered and authorized; this project does
+              not currently have the required app credentials or a verified upload/download client.
             </p>
             <ul class="provider-facts">
               <li>Authentication: requires an authorized TeraBox Open Platform app.</li>
@@ -716,7 +717,8 @@ function addSaveNote() {
           <p class="m-0 mt-1 text-sm text-secondary">
             A real login needs registered provider app credentials, a secure desktop OAuth callback,
             protected token storage, and API verification. A green status would be misleading before
-            those steps work. CloudCraft never asks you to paste your provider password into this page.
+            those steps work. CloudCraft never asks you to paste your provider password into this
+            page.
           </p>
         </div>
       </section>
