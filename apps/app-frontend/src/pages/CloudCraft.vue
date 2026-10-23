@@ -767,9 +767,9 @@ function addSaveNote() {
           process and account flow.
         </p>
         <p v-if="instanceError" class="inline-error" role="alert">{{ instanceError }}</p>
-        <p v-if="installError" class="inline-error" role="alert">{{ installError }}</p>
+        <p v-if="installError" class="inline-error" role="alert" aria-live="assertive">{{ installError }}</p>
         <p v-if="launchError" class="inline-error" role="alert">{{ launchError }}</p>
-        <p v-if="installMessage" class="success-message" role="status">{{ installMessage }}</p>
+        <p v-if="installMessage" class="success-message" role="status" aria-live="polite">{{ installMessage }}</p>
         <div v-if="instancesLoading" class="empty-state">
           <span class="text-secondary">Loading your real profiles…</span>
         </div>
