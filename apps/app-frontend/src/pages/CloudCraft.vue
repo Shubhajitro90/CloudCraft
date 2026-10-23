@@ -135,13 +135,13 @@ async function launchInstance(instance) {
   }
 }
 
-async function installInstance(instance) {
+async function installInstance(instance, force = false) {
   if (!instance?.path || installingPath.value || launchingPath.value) return
   installingPath.value = instance.path
   installError.value = ''
   installMessage.value = ''
   try {
-    await installProfile(instance.path, false)
+    await installProfile(instance.path, force)
     await loadInstances()
     const refreshed = instances.value.find((item) => item.path === instance.path)
     installMessage.value =
@@ -805,7 +805,16 @@ function addSaveNote() {
                 :disabled="!!installingPath || !!launchingPath"
                 @click="installInstance(instance)"
               >
-                {{ installingPath === instance.path ? 'Installing…' : 'Install / repair' }}
+                {{ installingPath === instance.path ? 'Installing…' : 'Install' }}
+              </button>
+              <button
+                v-if="instance.install_stage === 'installed'"
+                class="secondary-action"
+                type="button"
+                :disabled="!!installingPath || !!launchingPath"
+                @click="installInstance(instance, true)"
+              >
+                {{ installingPath === instance.path ? 'Repairing…' : 'Repair' }}
               </button>
               <button class="secondary-action" type="button" @click="openInstance(instance)">
                 Details
