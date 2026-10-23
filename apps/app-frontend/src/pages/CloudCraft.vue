@@ -94,6 +94,7 @@ watch(
 
 const sections = [
   { id: 'overview', label: 'Overview' },
+  { id: 'cloud', label: 'Cloud' },
   { id: 'instances', label: 'Instances' },
   { id: 'mods', label: 'Mods & modpacks' },
   { id: 'performance', label: 'Performance' },
@@ -482,6 +483,12 @@ function addSaveNote() {
           >
           <span class="feature-link">Tune memory <span aria-hidden="true">→</span></span>
         </button>
+        <button class="feature-card text-left" type="button" @click="activeSection = 'cloud'">
+          <span class="feature-icon">☁</span>
+          <span class="feature-title">Cloud connections</span>
+          <span class="feature-copy">Manage Kaggle compute and TeraBox storage connection setup.</span>
+          <span class="feature-link">Open cloud <span aria-hidden="true">→</span></span>
+        </button>
         <button class="feature-card text-left" type="button" @click="activeSection = 'saves'">
           <span class="feature-icon"><FolderOpenIcon /></span
           ><span class="feature-title">Save workspace</span>
@@ -578,6 +585,119 @@ function addSaveNote() {
             </button>
           </div>
           <p v-if="cloudSessionError" class="inline-error" role="alert">{{ cloudSessionError }}</p>
+        </div>
+      </section>
+    </template>
+
+    <template v-else-if="activeSection === 'cloud'">
+      <section class="content-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow m-0 mb-2">CLOUD CONNECTIONS</p>
+            <h2 class="m-0 text-2xl font-bold">Your cloud, one place</h2>
+          </div>
+          <span class="status-pill muted">2 providers · setup required</span>
+        </div>
+        <p class="mt-3 text-secondary">
+          CloudCraft separates remote compute from file storage. Kaggle may provide notebook compute;
+          TeraBox is a storage service. Neither connection is active until a supported authentication
+          flow is configured and verified.
+        </p>
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-5">
+          <article class="provider-card">
+            <div class="provider-card-heading">
+              <span class="provider-logo kaggle-logo" aria-hidden="true">K</span>
+              <div class="min-w-0 flex-1">
+                <h3 class="m-0 text-lg font-semibold">Kaggle Compute</h3>
+                <p class="m-0 mt-1 text-sm text-secondary">Potential remote runtime</p>
+              </div>
+              <span class="connection-state"><span class="connection-dot disconnected"></span>Not connected</span>
+            </div>
+            <p class="mt-4 text-sm text-secondary">
+              Official Kaggle APIs support notebook-related operations and OAuth 2.0 for registered
+              third-party apps. That does not by itself provide a supported interactive game-streaming
+              service. CloudCraft has no registered OAuth client or verified remote game runtime yet.
+            </p>
+            <ul class="provider-facts">
+              <li>Authentication: requires a registered OAuth client or a securely handled API token.</li>
+              <li>Compute: notebook runtime availability and limits are controlled by Kaggle.</li>
+              <li>Game streaming: not available in this build.</li>
+            </ul>
+            <a
+              class="secondary-action"
+              href="https://www.kaggle.com/docs/api"
+              target="_blank"
+              rel="noopener noreferrer"
+            >Open Kaggle API documentation ↗</a>
+            <a
+              class="provider-text-link"
+              href="https://www.kaggle.com/account"
+              target="_blank"
+              rel="noopener noreferrer"
+            >Open Kaggle account settings ↗</a>
+          </article>
+          <article class="provider-card">
+            <div class="provider-card-heading">
+              <span class="provider-logo terabox-logo" aria-hidden="true">T</span>
+              <div class="min-w-0 flex-1">
+                <h3 class="m-0 text-lg font-semibold">TeraBox Storage</h3>
+                <p class="m-0 mt-1 text-sm text-secondary">Potential world-backup storage</p>
+              </div>
+              <span class="connection-state"><span class="connection-dot disconnected"></span>Not connected</span>
+            </div>
+            <p class="mt-4 text-sm text-secondary">
+              CloudCraft can only connect through a supported TeraBox integration. The official
+              Open Platform requires an application to be registered and authorized; this project
+              does not currently have the required app credentials or a verified upload/download client.
+            </p>
+            <ul class="provider-facts">
+              <li>Authentication: requires an authorized TeraBox Open Platform app.</li>
+              <li>Storage: account quota and file access cannot be verified until connected.</li>
+              <li>World sync: not available in this build; local backups remain on this device.</li>
+            </ul>
+            <a
+              class="secondary-action"
+              href="https://www.terabox.com/integrations/docs?lang=en"
+              target="_blank"
+              rel="noopener noreferrer"
+            >Open TeraBox integration docs ↗</a>
+            <a
+              class="provider-text-link"
+              href="https://teraabox.com/developers"
+              target="_blank"
+              rel="noopener noreferrer"
+            >Open TeraBox developer portal ↗</a>
+          </article>
+        </div>
+      </section>
+      <section class="notice-panel">
+        <div class="notice-symbol">i</div>
+        <div>
+          <h3 class="m-0 text-base font-semibold">Why there is no “Connect” switch yet</h3>
+          <p class="m-0 mt-1 text-sm text-secondary">
+            A real login needs registered provider app credentials, a secure desktop OAuth callback,
+            protected token storage, and API verification. A green status would be misleading before
+            those steps work. CloudCraft never asks you to paste your provider password into this page.
+          </p>
+        </div>
+      </section>
+      <section class="content-panel">
+        <h3 class="m-0 text-lg font-semibold">What must be true before cloud play works</h3>
+        <div class="definition-grid">
+          <div>
+            <span class="definition-tag">COMPUTE</span>
+            <p class="text-sm text-secondary">
+              A supported remote runtime must start the graphical Minecraft client, expose a secure
+              low-latency video/input stream, and stop reliably when you exit.
+            </p>
+          </div>
+          <div>
+            <span class="definition-tag">STORAGE</span>
+            <p class="text-sm text-secondary">
+              A verified file API must upload and download complete world folders with integrity
+              checks, cancellation, conflict handling, and recovery.
+            </p>
+          </div>
         </div>
       </section>
     </template>
@@ -1123,6 +1243,73 @@ function addSaveNote() {
   bottom: 16px;
   left: 12px;
   font-size: 1.4rem;
+}
+.provider-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 1.25rem;
+  border: 1px solid var(--color-button-bg);
+  border-radius: 1rem;
+  background: var(--color-bg-raised);
+}
+.provider-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+}
+.provider-logo {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 2.75rem;
+  border-radius: 0.85rem;
+  color: white;
+  font-weight: 900;
+  font-size: 1.25rem;
+}
+.kaggle-logo {
+  background: linear-gradient(135deg, #20beff, #0876c9);
+}
+.terabox-logo {
+  background: linear-gradient(135deg, #56a7ff, #2255ce);
+}
+.connection-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  color: var(--color-secondary);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+.connection-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  display: inline-block;
+}
+.connection-dot.disconnected {
+  background: #f59e0b;
+}
+.provider-facts {
+  margin: 0;
+  padding-left: 1.15rem;
+  color: var(--color-secondary);
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+.provider-text-link {
+  color: #b59cff;
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+.provider-text-link:hover {
+  text-decoration: underline;
 }
 .primary-action,
 .secondary-action {
