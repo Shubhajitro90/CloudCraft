@@ -14,8 +14,9 @@ on:
       - packages/assets/**
       - packages/ui/**
       - packages/utils/**
+  workflow_dispatch:
   push:
-    branches: [cloudcraft-implementation]
+    branches: [cloudcraft-implementation, v0/status-recheck]
     paths:
       - .github/workflows/cloudcraft-frontend.yml
       - apps/app-frontend/**
