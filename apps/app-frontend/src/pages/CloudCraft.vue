@@ -1,10 +1,28 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { RouterLink, useRouter } from 'vue-router'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
-import { install as installProfile, list, run } from '@/helpers/profile'
+import {
+  get_optimal_jre_key,
+  install as installProfile,
+  kill as killProfile,
+  list,
+  run,
+} from '@/helpers/profile'
+import { get_by_profile_path } from '@/helpers/process'
+import { get_max_memory, test_jre } from '@/helpers/jre'
+import { get_default_user } from '@/helpers/auth'
+import { process_listener } from '@/helpers/events'
+import {
+  applyProcessEvent,
+  launchInstance as launchWithPreflight,
+  playability,
+  reconcileRunning,
+  stopInstance as stopWithConfirmation,
+  validateMemory,
+} from '@/helpers/cloudcraftLauncher'
 import { get as getSettings, set as setSettings } from '@/helpers/settings'
 import { cloudSessionProvider, cloudSessionStateLabel } from '@/helpers/cloudSession'
 import { cloudStorageProvider } from '@/helpers/cloudStorage'
@@ -125,16 +143,58 @@ async function loadInstances() {
   }
 }
 
+const runningPaths = ref({})
+const stoppingPath = ref('')
+let unlistenProcess = null
+
+const launcherDeps = {
+  getDefaultUser: get_default_user,
+  getOptimalJre: get_optimal_jre_key,
+  testJre: test_jre,
+  getSettings,
+  getMaxMemoryKib: get_max_memory,
+  run,
+  kill: killProfile,
+  processesFor: get_by_profile_path,
+}
+
+async function refreshRunning() {
+  runningPaths.value = await reconcileRunning(
+    instances.value.map((instance) => instance.path),
+    get_by_profile_path,
+  )
+}
+
 async function launchInstance(instance) {
-  if (!instance?.path || launchingPath.value) return
+  if (!instance?.path || launchingPath.value || runningPaths.value[instance.path]) return
   launchingPath.value = instance.path
   launchError.value = ''
   try {
-    await run(instance.path)
-  } catch (error) {
-    launchError.value = String(error?.message || error)
+    const outcome = await launchWithPreflight(instance, launcherDeps)
+    if (outcome.kind === 'blocked') {
+      launchError.value = outcome.issues.map((issue) => issue.message).join(' ')
+    } else if (outcome.kind === 'failed') {
+      launchError.value = `Launch failed: ${outcome.message}`
+      await loadInstances()
+    } else {
+      runningPaths.value = { ...runningPaths.value, [instance.path]: true }
+    }
   } finally {
     launchingPath.value = ''
+    refreshRunning()
+  }
+}
+
+async function stopGame(instance) {
+  if (!instance?.path || stoppingPath.value) return
+  stoppingPath.value = instance.path
+  launchError.value = ''
+  try {
+    const result = await stopWithConfirmation(instance.path, launcherDeps)
+    if (!result.stopped) launchError.value = `Could not stop the game: ${result.message}`
+  } finally {
+    stoppingPath.value = ''
+    await refreshRunning()
   }
 }
 
@@ -292,8 +352,15 @@ function openInstance(instance) {
   if (instance?.path) router.push(`/instance/${encodeURIComponent(instance.path)}`)
 }
 
-onMounted(() => {
-  loadInstances()
+onBeforeUnmount(() => {
+  if (unlistenProcess) unlistenProcess()
+})
+
+onMounted(async () => {
+  unlistenProcess = await process_listener((event) => {
+    runningPaths.value = applyProcessEvent(runningPaths.value, event)
+  })
+  loadInstances().then(refreshRunning)
   loadLauncherSettings()
   loadCloudSessionStatus()
   loadCloudStorageStatus()
