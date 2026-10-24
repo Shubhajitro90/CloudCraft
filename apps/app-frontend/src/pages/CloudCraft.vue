@@ -589,7 +589,9 @@ function addSaveNote() {
               @click="stopCloudSession"
             >
               {{
-                cloudSessionStatus.cleanupRequired ? 'Release remote resources' : 'Stop cloud session'
+                cloudSessionStatus.cleanupRequired
+                  ? 'Release remote resources'
+                  : 'Stop cloud session'
               }}
             </button>
             <button
