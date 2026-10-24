@@ -858,18 +858,18 @@ mod tests {
     #[test]
     fn configuration_rejects_invalid_limits_and_java_arguments() {
         let root = test_root();
-        let mut config = config(&root);
-        config.memory_mb = 128;
-        assert!(validate_config(config.clone()).is_err());
-        config = config(&root);
-        config.max_players = 0;
-        assert!(validate_config(config.clone()).is_err());
-        config = config(&root);
-        config.port = 0;
-        assert!(validate_config(config.clone()).is_err());
-        config = config(&root);
-        config.java_executable = "java -Xmalicious".into();
-        assert!(validate_config(config).is_err());
+        let mut invalid = config(&root);
+        invalid.memory_mb = 128;
+        assert!(validate_config(invalid).is_err());
+        let mut invalid = config(&root);
+        invalid.max_players = 0;
+        assert!(validate_config(invalid).is_err());
+        let mut invalid = config(&root);
+        invalid.port = 0;
+        assert!(validate_config(invalid).is_err());
+        let mut invalid = config(&root);
+        invalid.java_executable = "java -Xmalicious".into();
+        assert!(validate_config(invalid).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
