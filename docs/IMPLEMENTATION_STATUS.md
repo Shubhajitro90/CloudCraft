@@ -79,6 +79,13 @@ Branch: `cloudcraft-implementation`. Status entries distinguish code presence fr
 | Artifacts | `CloudCraft_0.9.204_x64-setup.exe` (NSIS) and `_x64_en-US.msi`; `CloudCraft_0.9.204_universal.dmg`; `CloudCraft_0.9.204_amd64.AppImage`, `.deb`, `-1.x86_64.rpm`. GitHub Actions artifacts expire per repository retention settings |
 | Desktop run | NOT done. The sandbox cannot run the AppImage (glibc older than the build, no display or GTK stack). The backup panel and deletion workflow have not been exercised in a running app |
 
+## Provider research (unconfirmed leads)
+
+These come from web-search summaries on 2026-10-24, not from reading the providers' own documents. Confirm each against the first-party page before relying on it. No provider code was written.
+
+- **TeraBox Open Platform:** apps appear to need an approved `client_id`, `client_secret` and `private_secret`, with an app name, logo and URL schemes. Upload looks like a three-step flow (`precreate`, sharded `superfile2` upload to a per-token upload domain, then `create`) with an MD5 block list. This fits the existing provider contract, but secrets must stay out of the frontend, and approval, quotas, terms and real transfer tests are all still outstanding.
+- **Kaggle for cloud gaming:** the Terms of Use and Acceptable Use Policy reportedly prohibit non-machine-learning use such as game streaming and unauthorized remote-desktop or tunnel access. If that is confirmed, Kaggle must not be used for the cloud-gaming or hosting features, and the row stays "Blocked by an external dependency".
+
 ## Exact external dependencies still required
 
 1. A legitimate Microsoft/Minecraft account, Java runtime, desktop OS, and game assets for authenticated local-launch integration testing.
