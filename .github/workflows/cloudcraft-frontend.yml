@@ -69,6 +69,8 @@ jobs:
             apps/app-frontend/src/components/ui/RunningAppBar.vue \
             apps/app-frontend/src/components/ui/modal/AppSettingsModal.vue \
             apps/app-frontend/src/components/ui/modal/ConfirmModalWrapper.vue \
+            apps/app-frontend/src/components/cloudcraft/ServerBackupsPanel.vue \
+            apps/app-frontend/src/helpers/cloudcraftServer.ts \
             apps/app-frontend/src/helpers/cloudSession.ts \
             apps/app-frontend/src/helpers/cloudStorage.ts \
             apps/app-frontend/src/helpers/update.js \
@@ -85,6 +87,8 @@ jobs:
             src/components/ui/RunningAppBar.vue \
             src/components/ui/modal/AppSettingsModal.vue \
             src/components/ui/modal/ConfirmModalWrapper.vue \
+            src/components/cloudcraft/ServerBackupsPanel.vue \
+            src/helpers/cloudcraftServer.ts \
             src/helpers/cloudSession.ts \
             src/helpers/cloudStorage.ts \
             src/helpers/update.js \

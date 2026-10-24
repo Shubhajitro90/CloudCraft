@@ -91,6 +91,11 @@ pub fn level_name(server_dir: &Path) -> Result<String, String> {
         Err(_) => DEFAULT_LEVEL.to_string(),
     };
     valid_component(&level, "The server level-name")?;
+    if level == BACKUP_ROOT {
+        return Err(format!(
+            "The server level-name cannot be '{BACKUP_ROOT}'."
+        ));
+    }
     Ok(level)
 }
 
@@ -329,7 +334,10 @@ pub fn verify_backup(
             continue;
         }
         let path = world.join(relative);
-        expected.insert(path.clone());
+        if !expected.insert(path.clone()) {
+            problems.push(format!("Duplicate manifest entry: {}", file.path));
+            continue;
+        }
         match fs::symlink_metadata(&path) {
             Ok(meta) if meta.is_file() => match hash_stream(&path, None) {
                 Ok((size, sha)) if size == file.size && sha == file.sha256 => {}
@@ -471,6 +479,115 @@ mod tests {
         fs::write(dir.join("server.properties"), "level-name=world\n").unwrap();
         assert!(create_backup(dir.to_str().unwrap()).is_ok());
         assert!(verify_backup(dir.to_str().unwrap(), "../x").is_err());
+    }
+
+    #[test]
+    fn missing_backup_file_is_reported() {
+        let dir = server_with_world();
+        let server = dir.to_str().unwrap();
+        let backup = create_backup(server).unwrap();
+        fs::remove_file(
+            backups_root(&dir).join(&backup.id).join("world/level.dat"),
+        )
+        .unwrap();
+        let report = verify_backup(server, &backup.id).unwrap();
+        assert!(!report.ok);
+        assert!(report.problems.iter().any(|p| p.starts_with("Missing")));
+        assert!(restore_backup(server, &backup.id).is_err());
+    }
+
+    #[test]
+    fn extra_backup_file_is_reported() {
+        let dir = server_with_world();
+        let server = dir.to_str().unwrap();
+        let backup = create_backup(server).unwrap();
+        fs::write(
+            backups_root(&dir).join(&backup.id).join("world/extra"),
+            b"x",
+        )
+        .unwrap();
+        let report = verify_backup(server, &backup.id).unwrap();
+        assert!(report.problems.iter().any(|p| p.starts_with("Unexpected")));
+    }
+
+    #[test]
+    fn malformed_or_mismatched_manifest_is_rejected() {
+        let dir = server_with_world();
+        let server = dir.to_str().unwrap();
+        let backup = create_backup(server).unwrap();
+        let manifest = backups_root(&dir).join(&backup.id).join(MANIFEST_FILE);
+
+        fs::write(&manifest, "not json").unwrap();
+        assert!(verify_backup(server, &backup.id).is_err());
+        assert!(list_backups(server).unwrap().is_empty());
+
+        fs::write(
+            &manifest,
+            r#"{"version":99,"id":"x","levelName":"world","createdAt":"","totalBytes":0,"files":[]}"#,
+        )
+        .unwrap();
+        assert!(verify_backup(server, &backup.id).is_err());
+    }
+
+    #[test]
+    fn unsafe_and_duplicate_manifest_paths_are_reported() {
+        let dir = server_with_world();
+        let server = dir.to_str().unwrap();
+        let backup = create_backup(server).unwrap();
+        let manifest_path =
+            backups_root(&dir).join(&backup.id).join(MANIFEST_FILE);
+        let mut manifest: BackupManifest =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap())
+                .unwrap();
+        let first = manifest.files[0].clone();
+        manifest.files.push(first);
+        manifest.files.push(ManifestFile {
+            path: "../escape".into(),
+            size: 0,
+            sha256: String::new(),
+        });
+        fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap())
+            .unwrap();
+
+        let report = verify_backup(server, &backup.id).unwrap();
+        assert!(report.problems.iter().any(|p| p.starts_with("Duplicate")));
+        assert!(report.problems.iter().any(|p| p.starts_with("Unsafe")));
+        assert!(restore_backup(server, &backup.id).is_err());
+    }
+
+    #[test]
+    fn restore_never_overwrites_an_existing_destination() {
+        let dir = server_with_world();
+        let server = dir.to_str().unwrap();
+        let backup = create_backup(server).unwrap();
+        let target = dir.join(format!("world-restored-{}", backup.id));
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("keep.txt"), b"keep").unwrap();
+
+        assert!(restore_backup(server, &backup.id).is_err());
+        assert_eq!(fs::read(target.join("keep.txt")).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn reserved_level_name_is_rejected() {
+        let dir = server_with_world();
+        fs::write(
+            dir.join("server.properties"),
+            format!("level-name={BACKUP_ROOT}\n"),
+        )
+        .unwrap();
+        assert!(create_backup(dir.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn missing_world_or_server_directory_fails_without_artifacts() {
+        let dir = temp_dir("empty");
+        assert!(create_backup(dir.to_str().unwrap()).is_err());
+        assert!(
+            !backups_root(&dir).exists()
+                || list_backups(dir.to_str().unwrap()).unwrap().is_empty()
+        );
+        assert!(create_backup(dir.join("nope").to_str().unwrap()).is_err());
     }
 
     #[cfg(unix)]
