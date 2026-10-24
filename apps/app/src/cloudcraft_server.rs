@@ -87,9 +87,9 @@ impl Default for ServerState {
 }
 
 fn lock_state() -> Result<MutexGuard<'static, ServerState>, String> {
-    SERVER_STATE
-        .lock()
-        .map_err(|_| "The local server state is unavailable after an internal error.".into())
+    SERVER_STATE.lock().map_err(|_| {
+        "The local server state is unavailable after an internal error.".into()
+    })
 }
 
 fn push_log(state: &mut ServerState, line: String) {
@@ -102,9 +102,9 @@ fn push_log(state: &mut ServerState, line: String) {
 
 fn refresh_process(state: &mut ServerState) -> Result<(), String> {
     let exited = match state.child.as_mut() {
-        Some(child) => child
-            .try_wait()
-            .map_err(|error| format!("Could not check the server process: {error}"))?,
+        Some(child) => child.try_wait().map_err(|error| {
+            format!("Could not check the server process: {error}")
+        })?,
         None => None,
     };
 
@@ -132,7 +132,9 @@ fn refresh_process(state: &mut ServerState) -> Result<(), String> {
 fn is_active(lifecycle: ServerLifecycle) -> bool {
     matches!(
         lifecycle,
-        ServerLifecycle::Starting | ServerLifecycle::Running | ServerLifecycle::Stopping
+        ServerLifecycle::Starting
+            | ServerLifecycle::Running
+            | ServerLifecycle::Stopping
     )
 }
 
@@ -144,7 +146,8 @@ fn status_from(state: &mut ServerState) -> ServerStatus {
     {
         state.config.as_ref().is_some_and(|config| {
             let address = SocketAddr::from(([127, 0, 0, 1], config.port));
-            TcpStream::connect_timeout(&address, Duration::from_millis(150)).is_ok()
+            TcpStream::connect_timeout(&address, Duration::from_millis(150))
+                .is_ok()
         })
     } else {
         false
@@ -223,8 +226,8 @@ fn status_from(state: &mut ServerState) -> ServerStatus {
 
 fn canonical_directory(value: &str, label: &str) -> Result<PathBuf, String> {
     let path = Path::new(value);
-    let metadata =
-        fs::symlink_metadata(path).map_err(|error| format!("Could not access {label}: {error}"))?;
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("Could not access {label}: {error}"))?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(format!(
             "{label} must be an existing directory, not a file or symbolic link."
@@ -243,7 +246,9 @@ fn validate_config(mut config: ServerConfig) -> Result<ServerConfig, String> {
         || config.name.len() > 64
         || config.name.chars().any(|character| character.is_control())
     {
-        return Err("Server name must contain 1–64 printable characters.".into());
+        return Err(
+            "Server name must contain 1–64 printable characters.".into()
+        );
     }
     if config.game_version.len() > 64
         || config
@@ -251,10 +256,15 @@ fn validate_config(mut config: ServerConfig) -> Result<ServerConfig, String> {
             .chars()
             .any(|character| character.is_control())
     {
-        return Err("Version label must contain no more than 64 printable characters.".into());
+        return Err(
+            "Version label must contain no more than 64 printable characters."
+                .into(),
+        );
     }
     if !(512..=1_048_576).contains(&config.memory_mb) {
-        return Err("Server memory must be between 512 MB and 1,048,576 MB.".into());
+        return Err(
+            "Server memory must be between 512 MB and 1,048,576 MB.".into()
+        );
     }
     if !(1..=1000).contains(&config.max_players) {
         return Err("Allowed players must be between 1 and 1000.".into());
@@ -268,16 +278,23 @@ fn validate_config(mut config: ServerConfig) -> Result<ServerConfig, String> {
         );
     }
 
-    let server_dir = canonical_directory(&config.server_dir, "server directory")?;
+    let server_dir =
+        canonical_directory(&config.server_dir, "server directory")?;
     let jar_original = Path::new(&config.server_jar);
     let jar_metadata = fs::symlink_metadata(jar_original)
         .map_err(|error| format!("Could not access the server JAR: {error}"))?;
-    if jar_metadata.file_type().is_symlink() || !jar_metadata.is_file() || jar_metadata.len() == 0 {
-        return Err("Server JAR must be a non-empty regular file, not a symbolic link.".into());
+    if jar_metadata.file_type().is_symlink()
+        || !jar_metadata.is_file()
+        || jar_metadata.len() == 0
+    {
+        return Err(
+            "Server JAR must be a non-empty regular file, not a symbolic link."
+                .into(),
+        );
     }
-    let server_jar = jar_original
-        .canonicalize()
-        .map_err(|error| format!("Could not resolve the server JAR: {error}"))?;
+    let server_jar = jar_original.canonicalize().map_err(|error| {
+        format!("Could not resolve the server JAR: {error}")
+    })?;
     if server_jar.parent() != Some(server_dir.as_path())
         || server_jar
             .extension()
@@ -291,23 +308,31 @@ fn validate_config(mut config: ServerConfig) -> Result<ServerConfig, String> {
         );
     }
 
-    if config.java_executable != "java" && config.java_executable != "java.exe" {
+    if config.java_executable != "java" && config.java_executable != "java.exe"
+    {
         let java_original = Path::new(&config.java_executable);
-        let java_metadata = fs::symlink_metadata(java_original)
-            .map_err(|error| format!("Could not access the Java executable: {error}"))?;
+        let java_metadata =
+            fs::symlink_metadata(java_original).map_err(|error| {
+                format!("Could not access the Java executable: {error}")
+            })?;
         if java_metadata.file_type().is_symlink() || !java_metadata.is_file() {
-            return Err("Java executable must be a regular file, not a symbolic link.".into());
+            return Err(
+                "Java executable must be a regular file, not a symbolic link."
+                    .into(),
+            );
         }
-        let java = java_original
-            .canonicalize()
-            .map_err(|error| format!("Could not resolve the Java executable: {error}"))?;
+        let java = java_original.canonicalize().map_err(|error| {
+            format!("Could not resolve the Java executable: {error}")
+        })?;
         let valid_name = java
             .file_name()
             .and_then(|value| value.to_str())
             .map(|value| value == "java" || value == "java.exe")
             .unwrap_or(false);
         if !valid_name {
-            return Err("Choose a Java executable named java or java.exe.".into());
+            return Err(
+                "Choose a Java executable named java or java.exe.".into()
+            );
         }
         config.java_executable = java.to_string_lossy().into_owned();
     }
@@ -342,7 +367,8 @@ fn update_properties(contents: &str, config: &ServerConfig) -> String {
     if !output.is_empty() {
         output.push(String::new());
     }
-    output.push("# Managed by CloudCraft; other settings are preserved.".into());
+    output
+        .push("# Managed by CloudCraft; other settings are preserved.".into());
     output.push(format!("server-port={}", config.port));
     output.push(format!("max-players={}", config.max_players));
     output.push("online-mode=true".into());
@@ -354,25 +380,35 @@ fn update_properties(contents: &str, config: &ServerConfig) -> String {
 
 fn write_configuration_files(config: &ServerConfig) -> Result<(), String> {
     let server_dir = Path::new(&config.server_dir);
-    let serialized = serde_json::to_string_pretty(config)
-        .map_err(|error| format!("Could not serialize the server configuration: {error}"))?;
+    let serialized = serde_json::to_string_pretty(config).map_err(|error| {
+        format!("Could not serialize the server configuration: {error}")
+    })?;
     fs::write(server_dir.join(CONFIG_FILE), format!("{serialized}\n"))
-        .map_err(|error| format!("Could not save the server configuration: {error}"))?;
+        .map_err(|error| {
+            format!("Could not save the server configuration: {error}")
+        })?;
 
     fs::write(
         server_dir.join("eula.txt"),
         "# Accepted explicitly in CloudCraft\neula=true\n",
     )
-    .map_err(|error| format!("Could not record Minecraft EULA acceptance: {error}"))?;
+    .map_err(|error| {
+        format!("Could not record Minecraft EULA acceptance: {error}")
+    })?;
 
     let properties_path = server_dir.join("server.properties");
     let existing = match fs::read_to_string(&properties_path) {
         Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => return Err(format!("Could not read server.properties: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            String::new()
+        }
+        Err(error) => {
+            return Err(format!("Could not read server.properties: {error}"))
+        }
     };
-    fs::write(&properties_path, update_properties(&existing, config))
-        .map_err(|error| format!("Could not update server.properties: {error}"))?;
+    fs::write(&properties_path, update_properties(&existing, config)).map_err(
+        |error| format!("Could not update server.properties: {error}"),
+    )?;
     Ok(())
 }
 
@@ -385,8 +421,10 @@ fn read_config(server_dir: &str) -> Result<ServerConfig, String> {
             config_path.display()
         )
     })?;
-    let config: ServerConfig = serde_json::from_str(&contents)
-        .map_err(|error| format!("The saved server configuration is invalid: {error}"))?;
+    let config: ServerConfig =
+        serde_json::from_str(&contents).map_err(|error| {
+            format!("The saved server configuration is invalid: {error}")
+        })?;
     validate_config(config)
 }
 
@@ -395,7 +433,10 @@ fn configure_server(config: ServerConfig) -> Result<ServerStatus, String> {
     let mut state = lock_state()?;
     refresh_process(&mut state)?;
     if is_active(state.lifecycle) {
-        return Err("Stop the active local server before changing its configuration.".into());
+        return Err(
+            "Stop the active local server before changing its configuration."
+                .into(),
+        );
     }
     write_configuration_files(&config)?;
     state.config = Some(config);
@@ -409,7 +450,8 @@ fn load_server(server_dir: String) -> Result<ServerStatus, String> {
     let mut state = lock_state()?;
     refresh_process(&mut state)?;
     if is_active(state.lifecycle)
-        && state.config.as_ref().map(|item| &item.server_dir) != Some(&config.server_dir)
+        && state.config.as_ref().map(|item| &item.server_dir)
+            != Some(&config.server_dir)
     {
         return Err("Another local server is currently active.".into());
     }
@@ -434,7 +476,10 @@ where
                 }
                 Err(error) => {
                     if let Ok(mut state) = SERVER_STATE.lock() {
-                        push_log(&mut state, format!("[CloudCraft] Log read failed: {error}"));
+                        push_log(
+                            &mut state,
+                            format!("[CloudCraft] Log read failed: {error}"),
+                        );
                     }
                     break;
                 }
@@ -448,15 +493,17 @@ fn start_server(server_dir: String) -> Result<ServerStatus, String> {
     let mut state = lock_state()?;
     refresh_process(&mut state)?;
     if is_active(state.lifecycle) {
-        if state.config.as_ref().map(|item| &item.server_dir) == Some(&config.server_dir) {
+        if state.config.as_ref().map(|item| &item.server_dir)
+            == Some(&config.server_dir)
+        {
             return Ok(status_from(&mut state));
         }
         return Err("Another local server is already active.".into());
     }
 
-    let jar = Path::new(&config.server_jar)
-        .file_name()
-        .ok_or_else(|| "The configured server JAR has no valid file name.".to_string())?;
+    let jar = Path::new(&config.server_jar).file_name().ok_or_else(|| {
+        "The configured server JAR has no valid file name.".to_string()
+    })?;
     let mut child = Command::new(&config.java_executable)
         .current_dir(&config.server_dir)
         .arg(format!("-Xmx{}M", config.memory_mb))
@@ -510,7 +557,9 @@ fn stop_server() -> Result<ServerStatus, String> {
             stdin
                 .write_all(b"stop\n")
                 .and_then(|_| stdin.flush())
-                .map_err(|error| format!("Could not send the graceful stop command: {error}"))?;
+                .map_err(|error| {
+                    format!("Could not send the graceful stop command: {error}")
+                })?;
         }
     }
     state.lifecycle = ServerLifecycle::Stopping;
@@ -526,7 +575,9 @@ fn stop_server() -> Result<ServerStatus, String> {
             .as_mut()
             .expect("checked above")
             .try_wait()
-            .map_err(|error| format!("Could not check the stopping server: {error}"))?;
+            .map_err(|error| {
+                format!("Could not check the stopping server: {error}")
+            })?;
         if exited.is_some() {
             break;
         }
@@ -548,12 +599,12 @@ fn force_stop_server() -> Result<ServerStatus, String> {
     let mut state = lock_state()?;
     refresh_process(&mut state)?;
     if let Some(child) = state.child.as_mut() {
-        child
-            .kill()
-            .map_err(|error| format!("Could not force-stop the server process: {error}"))?;
-        child
-            .wait()
-            .map_err(|error| format!("Could not reap the server process: {error}"))?;
+        child.kill().map_err(|error| {
+            format!("Could not force-stop the server process: {error}")
+        })?;
+        child.wait().map_err(|error| {
+            format!("Could not reap the server process: {error}")
+        })?;
     }
     state.child = None;
     state.lifecycle = ServerLifecycle::Stopped;
@@ -578,21 +629,29 @@ fn server_logs() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-pub async fn cloudcraft_server_configure(config: ServerConfig) -> Result<ServerStatus, String> {
+pub async fn cloudcraft_server_configure(
+    config: ServerConfig,
+) -> Result<ServerStatus, String> {
     tokio::task::spawn_blocking(move || configure_server(config))
         .await
-        .map_err(|error| format!("Server configuration worker failed: {error}"))?
+        .map_err(|error| {
+            format!("Server configuration worker failed: {error}")
+        })?
 }
 
 #[tauri::command]
-pub async fn cloudcraft_server_load(server_dir: String) -> Result<ServerStatus, String> {
+pub async fn cloudcraft_server_load(
+    server_dir: String,
+) -> Result<ServerStatus, String> {
     tokio::task::spawn_blocking(move || load_server(server_dir))
         .await
         .map_err(|error| format!("Server load worker failed: {error}"))?
 }
 
 #[tauri::command]
-pub async fn cloudcraft_server_start(server_dir: String) -> Result<ServerStatus, String> {
+pub async fn cloudcraft_server_start(
+    server_dir: String,
+) -> Result<ServerStatus, String> {
     tokio::task::spawn_blocking(move || start_server(server_dir))
         .await
         .map_err(|error| format!("Server start worker failed: {error}"))?
@@ -661,7 +720,8 @@ mod tests {
     use super::*;
 
     fn test_root() -> PathBuf {
-        std::env::temp_dir().join(format!("cloudcraft-server-test-{}", Uuid::new_v4()))
+        std::env::temp_dir()
+            .join(format!("cloudcraft-server-test-{}", Uuid::new_v4()))
     }
 
     fn config(root: &Path) -> ServerConfig {
@@ -695,7 +755,8 @@ mod tests {
         let validated = validate_config(config(&root)).unwrap();
         write_configuration_files(&validated).unwrap();
 
-        let properties = fs::read_to_string(server_dir.join("server.properties")).unwrap();
+        let properties =
+            fs::read_to_string(server_dir.join("server.properties")).unwrap();
         assert!(properties.contains("view-distance=12"));
         assert!(properties.contains("online-mode=true"));
         assert!(properties.contains("server-ip=127.0.0.1"));
