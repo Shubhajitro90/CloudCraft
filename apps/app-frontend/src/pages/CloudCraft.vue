@@ -8,6 +8,7 @@ import { install as installProfile, list, run } from '@/helpers/profile'
 import { get as getSettings, set as setSettings } from '@/helpers/settings'
 import { cloudSessionProvider } from '@/helpers/cloudSession'
 import { cloudStorageProvider } from '@/helpers/cloudStorage'
+import LocalServerPanel from '@/components/cloudcraft/LocalServerPanel.vue'
 import {
   CompassIcon,
   DownloadIcon,
@@ -943,6 +944,7 @@ function addSaveNote() {
     </template>
 
     <template v-else-if="activeSection === 'servers'">
+      <LocalServerPanel />
       <section class="content-panel">
         <div class="panel-heading">
           <div>
