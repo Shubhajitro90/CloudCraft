@@ -2,7 +2,7 @@
 
 CloudCraft is a desktop Minecraft launcher built on the existing AstralRinth / Theseus-based codebase. It keeps the existing launcher engine and adds an original dark, violet-accented workspace for instances, content discovery, performance settings, and local multiplayer/save utilities.
 
-> **Status:** The CloudCraft interface and launcher integrations are implemented on the `cloudcraft-implementation` branch. This is not a claim that cloud gaming or cloud storage is live. See [the implementation status](docs/cloudcraft.md) for the exact scope and validation status.
+> **Status:** The CloudCraft interface and launcher integrations are implemented on the `cloudcraft-implementation` branch. This is not a claim that cloud gaming or cloud storage is live. See [the architecture and provider notes](docs/cloudcraft.md) and [the implementation checklist](docs/IMPLEMENTATION_STATUS.md) for exact scope and validation status.
 
 ## What works today
 
@@ -12,14 +12,16 @@ CloudCraft is a desktop Minecraft launcher built on the existing AstralRinth / T
 - **Instances:** reads profiles from the existing launcher backend, opens a profile's existing details page, and invokes the normal launch command for installed profiles.
 - **Content discovery:** links into the existing Modrinth-backed browser for mods, modpacks, resource packs, and shaders.
 - **Performance:** reads and saves the launcher's actual global minimum/maximum memory allocation.
-- **Server shortcuts:** stores up to ten server addresses in local browser storage for convenience. It does not provision or host a server.
+- **Temporary local servers:** configures and runs a user-selected Minecraft server JAR with Java, explicit EULA acceptance, bounded logs, actual process/reachability status, graceful stop, confirmed force-stop, and launcher-exit cleanup. It binds to loopback and is labeled local mode, not cloud hosting.
+- **Server shortcuts:** stores up to ten server addresses in local browser storage for convenience.
+- **Local server validation:** configuration tests cover path and argument rejection, EULA acceptance, safe properties, persistence, and bounded logs. Full desktop and real-JAR lifecycle verification remains required.
 - **Local world backups:** copies a selected world folder into a backup directory you choose and restores a backup into a new folder. Existing folders are never overwritten; symbolic links are rejected.
 - **Save reminders:** stores labels and notes locally and exports those reminders as JSON. This metadata export is not cloud synchronization.
 
 ## What is not connected
 
 - No remote Minecraft client / cloud gaming provider.
-- No hosted multiplayer server provider.
+- No remote/hosted multiplayer server provider. The temporary server workflow currently supports local mode only.
 - No cloud storage account, world uploads, cross-device save synchronization, or remote restore service.
 - No new skins/capes service.
 
@@ -49,4 +51,4 @@ CloudCraft builds on an existing open-source launcher codebase and its dependenc
 
 ## Project status
 
-See [docs/cloudcraft.md](docs/cloudcraft.md) for current feature boundaries, security notes, and validation requirements.
+See [docs/cloudcraft.md](docs/cloudcraft.md) for architecture and [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for requirement-level evidence and remaining dependencies.

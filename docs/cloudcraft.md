@@ -12,6 +12,7 @@ This document separates working integrations from future architecture. It should
 | Instances | Loads profiles through the existing profile API; installed profiles can Play; non-installed profiles can Install/repair with the existing profile installation API; Details opens the profile route. Errors and completion are surfaced in the UI | Existing Rust/Tauri launcher commands |
 | Mods and modpacks | Links to the existing content-browser routes | Existing Modrinth-backed browser and install flow |
 | Performance | Reads and persists global min/max memory settings, validates integer bounds, and re-reads settings before saving to avoid overwriting unrelated updates | Existing settings backend |
+| Temporary local servers | Validates and persists a local server configuration; runs a user-selected JAR through Java without a shell; captures bounded logs; checks actual process and TCP status; supports graceful stop, confirmed force-stop, and launcher-exit cleanup. Requires explicit EULA acceptance and binds to loopback with online mode enabled | New Tauri local-server commands; full real-JAR integration verification is still required |
 | Server shortcuts | Stores a limited list of addresses in local browser storage; supports selecting, copying, and removing saved addresses | Browser local storage and clipboard |
 | Local world backups | Copies a selected world directory to a chosen backup folder with a timestamped name; restores into a new directory without overwriting existing content. Copies are uncompressed and remain on this device | Tauri commands and local filesystem copy |
 | Save reminders | Stores user-entered labels/notes locally; exports reminder metadata as JSON | Browser local storage and Blob download |
@@ -22,7 +23,7 @@ This document separates working integrations from future architecture. It should
 ## Not implemented
 
 - **Cloud gaming:** no remote VM/session allocation, game streaming, input transport, provider credentials, billing/quota, or session lifecycle exists in this implementation. The Cloud tab is informational and does not log in to Kaggle.
-- **Hosted servers:** no provider API, server provisioning, lifecycle management, or remote server status is connected.
+- **Hosted servers:** no remote provider API, provisioning, or remote server status is connected. The separate local server workflow is implemented but still needs end-to-end Java/server-JAR verification; integrated server-world snapshots and resource deletion are not implemented.
 - **Cloud saves:** the typed `cloudStorageProvider` interface defines status, backup listing, upload/download progress, deletion, and cancellation. The Cloud tab links to TeraBox's official integration documentation, but no remote account login, app credentials, encrypted transfer, conflict resolution, synchronization protocol, or recovery workflow is connected; all provider operations remain unavailable until a real integration is reviewed and tested.
 - **Skins/capes:** no new system is connected.
 - **Self-updating releases:** CloudCraft's update check no longer points at AstralRinth installers. Until a CloudCraft release with signed, platform-appropriate installers is published, automatic update installation is not available. Do not publish an installer until signing, update metadata, and recovery have been tested.
@@ -35,6 +36,7 @@ Do not label these features as live or show invented connection state. Kaggle do
 - Keep secrets out of Vue state persisted to browser storage, logs, telemetry, URLs, and exported manifests.
 - The local backup commands require existing directories, reject source/destination overlap, reject symbolic links, avoid overwriting existing restore targets, and attempt to remove partial output after a failed copy. Close Minecraft before copying a live world. This is not a substitute for testing recovery on important worlds.
 - Treat server addresses and reminder notes as user-provided data; they are not verified or transmitted by CloudCraft.
+- Local servers require a user-selected non-empty JAR directly inside a dedicated directory. CloudCraft does not download server executables, accept arbitrary Java arguments, disable online mode, or bind to a public interface. The UI displays a connection address only after a loopback TCP connection succeeds. Graceful stop is attempted before any separately confirmed force-stop.
 - Do not weaken the upstream authentication or launcher security model to simulate a cloud feature.
 - The updater now checks only CloudCraft's own GitHub releases. The existing launcher must not install a binary from the AstralRinth upstream release feed.
 
