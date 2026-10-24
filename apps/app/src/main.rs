@@ -10,6 +10,8 @@ use theseus::prelude::*;
 mod api;
 mod cloudcraft_server;
 mod cloudcraft_server_backup;
+mod cloudcraft_server_delete;
+mod cloudcraft_server_ops;
 mod error;
 
 #[cfg(target_os = "macos")]
@@ -674,6 +676,10 @@ fn main() {
             cloudcraft_server::cloudcraft_server_backup_list,
             cloudcraft_server::cloudcraft_server_backup_verify,
             cloudcraft_server::cloudcraft_server_backup_restore,
+            cloudcraft_server::cloudcraft_operation_status,
+            cloudcraft_server::cloudcraft_operation_cancel,
+            cloudcraft_server::cloudcraft_server_delete_plan,
+            cloudcraft_server::cloudcraft_server_delete,
         ]);
 
     #[cfg(target_os = "macos")]

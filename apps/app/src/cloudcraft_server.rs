@@ -1,6 +1,13 @@
 use crate::cloudcraft_server_backup::{
     self as backup, BackupSummary, VerifyReport,
 };
+use crate::cloudcraft_server_delete::{
+    self as deletion, DeleteTarget, DeletionPlan, DeletionResult,
+    ServerObservation,
+};
+use crate::cloudcraft_server_ops::{
+    self as ops, OpError, OperationKind, OperationSnapshot, Tracker,
+};
 use chrono::{DateTime, Utc};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -434,6 +441,7 @@ fn read_config(server_dir: &str) -> Result<ServerConfig, String> {
 fn configure_server(config: ServerConfig) -> Result<ServerStatus, String> {
     let config = validate_config(config)?;
     let mut state = lock_state()?;
+    ensure_no_file_operation()?;
     refresh_process(&mut state)?;
     if is_active(state.lifecycle) {
         return Err(
@@ -494,6 +502,7 @@ where
 fn start_server(server_dir: String) -> Result<ServerStatus, String> {
     let config = read_config(&server_dir)?;
     let mut state = lock_state()?;
+    ensure_no_file_operation()?;
     refresh_process(&mut state)?;
     if is_active(state.lifecycle) {
         if state.config.as_ref().map(|item| &item.server_dir)
@@ -688,6 +697,18 @@ pub async fn cloudcraft_server_logs() -> Result<Vec<String>, String> {
         .map_err(|error| format!("Server log worker failed: {error}"))?
 }
 
+/// Starting or reconfiguring a server is refused while a backup, restore or
+/// deletion owns the server's files.
+fn ensure_no_file_operation() -> Result<(), String> {
+    match ops::global().busy() {
+        Some(kind) => Err(format!(
+            "A {} is in progress. Wait for it to finish before starting or reconfiguring the server.",
+            kind.label()
+        )),
+        None => Ok(()),
+    }
+}
+
 fn ensure_server_inactive() -> Result<(), String> {
     let mut state = lock_state()?;
     refresh_process(&mut state)?;
@@ -700,33 +721,107 @@ fn ensure_server_inactive() -> Result<(), String> {
     Ok(())
 }
 
-async fn run_backup_task<T, F>(task: F) -> Result<T, String>
+fn audit(line: String) {
+    tracing::info!(target: "cloudcraft_audit", "{line}");
+    if let Ok(mut state) = lock_state() {
+        push_log(&mut state, format!("[CloudCraft audit] {line}"));
+    }
+}
+
+fn configured_port(server_dir: &Path) -> u16 {
+    if let Ok(contents) = fs::read_to_string(server_dir.join(CONFIG_FILE)) {
+        if let Ok(config) = serde_json::from_str::<ServerConfig>(&contents) {
+            return config.port;
+        }
+    }
+    fs::read_to_string(server_dir.join("server.properties"))
+        .ok()
+        .and_then(|contents| {
+            contents
+                .lines()
+                .filter_map(|line| line.trim().strip_prefix("server-port="))
+                .next_back()
+                .and_then(|value| value.trim().parse().ok())
+        })
+        .unwrap_or(25565)
+}
+
+/// Decides whether the server for `server_dir` is provably stopped. Anything
+/// CloudCraft cannot prove is reported as uncertain, which blocks deletion.
+fn observe_server(server_dir: &str) -> ServerObservation {
+    let mut state = match lock_state() {
+        Ok(state) => state,
+        Err(error) => return ServerObservation::Uncertain(error),
+    };
+    if let Err(error) = refresh_process(&mut state) {
+        return ServerObservation::Uncertain(error);
+    }
+    if is_active(state.lifecycle) || state.child.is_some() {
+        return ServerObservation::Active;
+    }
+    let directory = match canonical_directory(server_dir, "server directory") {
+        Ok(directory) => directory,
+        Err(error) => return ServerObservation::Uncertain(error),
+    };
+    let address =
+        SocketAddr::from(([127, 0, 0, 1], configured_port(&directory)));
+    if TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok()
+    {
+        return ServerObservation::Uncertain(
+            "something is accepting connections on the server's port, so a server CloudCraft did not start may be running"
+                .into(),
+        );
+    }
+    ServerObservation::Stopped
+}
+
+fn run_operation<T, F>(
+    kind: OperationKind,
+    require_inactive: bool,
+    success_message: &'static str,
+    task: F,
+) -> Result<T, String>
+where
+    F: FnOnce(&Tracker) -> Result<T, OpError>,
+{
+    let tracker = ops::global().begin(kind)?;
+    let result = if require_inactive {
+        ensure_server_inactive().map_err(OpError::Failed)
+    } else {
+        Ok(())
+    }
+    .and_then(|()| task(&tracker));
+    tracker.finish(&result, success_message);
+    result.map_err(String::from)
+}
+
+async fn run_blocking<T, F>(work: F) -> Result<T, String>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, String> + Send + 'static,
 {
-    tokio::task::spawn_blocking(move || {
-        ensure_server_inactive()?;
-        task()
-    })
-    .await
-    .map_err(|error| format!("Backup worker failed: {error}"))?
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| format!("File operation worker failed: {error}"))?
 }
 
 #[tauri::command]
 pub async fn cloudcraft_server_backup_create(
     server_dir: String,
 ) -> Result<BackupSummary, String> {
-    run_backup_task(move || backup::create_backup(&server_dir)).await
+    run_blocking(move || {
+        run_operation(OperationKind::Backup, true, "Backup completed.", |t| {
+            backup::create_backup(&server_dir, t)
+        })
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn cloudcraft_server_backup_list(
     server_dir: String,
 ) -> Result<Vec<BackupSummary>, String> {
-    tokio::task::spawn_blocking(move || backup::list_backups(&server_dir))
-        .await
-        .map_err(|error| format!("Backup worker failed: {error}"))?
+    run_blocking(move || backup::list_backups(&server_dir)).await
 }
 
 #[tauri::command]
@@ -734,11 +829,15 @@ pub async fn cloudcraft_server_backup_verify(
     server_dir: String,
     backup_id: String,
 ) -> Result<VerifyReport, String> {
-    tokio::task::spawn_blocking(move || {
-        backup::verify_backup(&server_dir, &backup_id)
+    run_blocking(move || {
+        run_operation(
+            OperationKind::Verify,
+            false,
+            "Verification completed.",
+            |t| backup::verify_backup(&server_dir, &backup_id, t),
+        )
     })
     .await
-    .map_err(|error| format!("Backup worker failed: {error}"))?
 }
 
 /// Restores into a new folder; the current world is never modified.
@@ -747,8 +846,88 @@ pub async fn cloudcraft_server_backup_restore(
     server_dir: String,
     backup_id: String,
 ) -> Result<String, String> {
-    run_backup_task(move || backup::restore_backup(&server_dir, &backup_id))
-        .await
+    run_blocking(move || {
+        run_operation(OperationKind::Restore, true, "Restore completed.", |t| {
+            backup::restore_backup(&server_dir, &backup_id, t)
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn cloudcraft_operation_status(
+) -> Result<Option<OperationSnapshot>, String> {
+    Ok(ops::global().snapshot())
+}
+
+#[tauri::command]
+pub async fn cloudcraft_operation_cancel() -> Result<OperationSnapshot, String>
+{
+    ops::global().request_cancel()
+}
+
+#[tauri::command]
+pub async fn cloudcraft_server_delete_plan(
+    server_dir: String,
+) -> Result<DeletionPlan, String> {
+    run_blocking(move || {
+        let observation = observe_server(&server_dir);
+        deletion::plan(&server_dir, &observation)
+    })
+    .await
+}
+
+/// Deletes one explicitly confirmed resource. Stopping a server never deletes
+/// files, and each target removes only what it names.
+#[tauri::command]
+pub async fn cloudcraft_server_delete(
+    server_dir: String,
+    target: DeleteTarget,
+    confirmation: String,
+) -> Result<DeletionResult, String> {
+    run_blocking(move || {
+        let tracker = ops::global().begin(OperationKind::Delete)?;
+        let observation = observe_server(&server_dir);
+        let result = deletion::delete_resource(
+            &server_dir,
+            &target,
+            &confirmation,
+            &observation,
+            &tracker,
+            &mut audit,
+        );
+        if matches!(target, DeleteTarget::Configuration)
+            && result.as_ref().is_ok_and(|outcome| outcome.complete)
+        {
+            forget_loaded_configuration(&server_dir);
+        }
+        let message = result
+            .as_ref()
+            .map(|outcome| outcome.message.clone())
+            .unwrap_or_default();
+        tracker.finish(&result, &message);
+        result.map_err(String::from)
+    })
+    .await
+}
+
+/// After the configuration file is gone the loaded state must not keep
+/// offering to start a server that no longer has a configuration.
+fn forget_loaded_configuration(server_dir: &str) {
+    let Ok(directory) = Path::new(server_dir).canonicalize() else {
+        return;
+    };
+    if let Ok(mut state) = lock_state() {
+        let same = state
+            .config
+            .as_ref()
+            .is_some_and(|config| Path::new(&config.server_dir) == directory);
+        if same && !is_active(state.lifecycle) {
+            state.config = None;
+            state.lifecycle = ServerLifecycle::Stopped;
+            state.last_error = None;
+        }
+    }
 }
 
 /// Called by the desktop event loop so a launcher exit never abandons a child server.
