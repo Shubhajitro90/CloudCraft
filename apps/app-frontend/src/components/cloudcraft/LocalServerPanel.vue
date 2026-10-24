@@ -13,6 +13,7 @@ import {
   type LocalServerStatus,
 } from '@/helpers/cloudcraftServer'
 import ServerBackupsPanel from './ServerBackupsPanel.vue'
+import ServerDeletePanel from './ServerDeletePanel.vue'
 
 const LAST_DIRECTORY_KEY = 'cloudcraft.local-server-directory'
 const form = reactive<LocalServerConfig>({
@@ -428,6 +429,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
     </div>
 
     <ServerBackupsPanel :server-dir="form.serverDir" :server-active="active" />
+    <ServerDeletePanel :server-dir="form.serverDir" :server-active="active" />
 
     <details class="server-logs" :open="active">
       <summary>

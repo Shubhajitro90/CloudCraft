@@ -1,30 +1,46 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+
+import { deletionNotice, formatBytes } from '@/helpers/cloudcraftOperations'
 import {
   createServerBackup,
+  deleteServerResource,
   listServerBackups,
   restoreServerBackup,
-  verifyServerBackup,
   type ServerBackupSummary,
+  verifyServerBackup,
 } from '@/helpers/cloudcraftServer'
+import { useServerOperation } from '@/helpers/useServerOperation'
+
+import ServerDeleteConfirm from './ServerDeleteConfirm.vue'
+import ServerOperationProgress from './ServerOperationProgress.vue'
 
 const props = defineProps<{ serverDir: string; serverActive: boolean }>()
 
+const operation = useServerOperation()
 const backups = ref<ServerBackupSummary[]>([])
-const busyId = ref<string | null>(null)
-const creating = ref(false)
+const activeId = ref<string | null>(null)
+const pendingDelete = ref<ServerBackupSummary | null>(null)
 const error = ref('')
 const message = ref('')
 
-const errorText = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause))
+const busy = computed(() => operation.running.value)
+const showProgress = computed(
+  () =>
+    operation.running.value &&
+    operation.snapshot.value !== null &&
+    operation.snapshot.value.kind !== 'delete',
+)
+const deletingBackup = computed(
+  () => operation.running.value && operation.snapshot.value?.kind === 'delete',
+)
 
-function formatSize(bytes: number) {
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+function reset() {
+  error.value = ''
+  message.value = ''
 }
 
 async function refresh() {
-  error.value = ''
   if (!props.serverDir.trim()) {
     backups.value = []
     return
@@ -33,38 +49,42 @@ async function refresh() {
     backups.value = await listServerBackups(props.serverDir.trim())
   } catch (cause) {
     backups.value = []
-    error.value = errorText(cause)
+    error.value = cause instanceof Error ? cause.message : String(cause)
   }
 }
 
 async function create() {
-  creating.value = true
-  error.value = ''
-  message.value = ''
-  try {
-    const backup = await createServerBackup(props.serverDir.trim())
-    message.value = `Backup ${backup.id} created with ${backup.fileCount} verified files.`
-    await refresh()
-  } catch (cause) {
-    error.value = errorText(cause)
-  } finally {
-    creating.value = false
+  reset()
+  const result = await operation.run('backup', () => createServerBackup(props.serverDir.trim()))
+  if (result.ok) {
+    message.value = `Backup ${result.value.id} created: ${result.value.fileCount} files copied and recorded with SHA-256 hashes.`
+  } else if (result.outcome.kind === 'cancelled') {
+    message.value = result.outcome.text
+  } else {
+    error.value = result.outcome.text
   }
+  await refresh()
 }
 
 async function verify(backup: ServerBackupSummary) {
-  busyId.value = backup.id
-  error.value = ''
-  message.value = ''
-  try {
-    const report = await verifyServerBackup(props.serverDir.trim(), backup.id)
-    if (report.ok) message.value = `Backup ${backup.id} passed integrity verification.`
-    else error.value = `Backup ${backup.id} failed: ${report.problems.slice(0, 3).join('; ')}`
-  } catch (cause) {
-    error.value = errorText(cause)
-  } finally {
-    busyId.value = null
+  reset()
+  activeId.value = backup.id
+  const result = await operation.run('verify', () =>
+    verifyServerBackup(props.serverDir.trim(), backup.id),
+  )
+  activeId.value = null
+  if (!result.ok) {
+    if (result.outcome.kind === 'cancelled') {
+      message.value =
+        'Verification cancelled. The backup was not changed and no result was recorded.'
+    } else {
+      error.value = result.outcome.text
+    }
+    return
   }
+  const report = result.value
+  if (report.ok) message.value = `Backup ${backup.id} passed integrity verification.`
+  else error.value = `Backup ${backup.id} failed: ${report.problems.slice(0, 3).join('; ')}`
 }
 
 async function restore(backup: ServerBackupSummary) {
@@ -74,19 +94,40 @@ async function restore(backup: ServerBackupSummary) {
       'level-name in server.properties to the new folder name.',
   )
   if (!confirmed) return
-  busyId.value = backup.id
-  error.value = ''
-  message.value = ''
-  try {
-    const folder = await restoreServerBackup(props.serverDir.trim(), backup.id)
-    message.value = `Restored to the new folder "${folder}". The current world was not modified.`
-  } catch (cause) {
-    error.value = errorText(cause)
-  } finally {
-    busyId.value = null
+  reset()
+  activeId.value = backup.id
+  const result = await operation.run('restore', () =>
+    restoreServerBackup(props.serverDir.trim(), backup.id),
+  )
+  activeId.value = null
+  if (result.ok) {
+    message.value = `Restored to the new folder "${result.value}". The current world was not modified.`
+  } else if (result.outcome.kind === 'cancelled') {
+    message.value = `Restore cancelled. No partial world was created and the current world was not modified.`
+  } else {
+    error.value = result.outcome.text
   }
 }
 
+async function confirmDeleteBackup(typed: string) {
+  const backup = pendingDelete.value
+  if (!backup) return
+  reset()
+  const result = await operation.run('delete', () =>
+    deleteServerResource(props.serverDir.trim(), { kind: 'backup', id: backup.id }, typed),
+  )
+  if (result.ok) {
+    const notice = deletionNotice(result.value)
+    if (notice.ok) message.value = notice.text
+    else error.value = notice.text
+    pendingDelete.value = null
+  } else {
+    error.value = result.outcome.text
+  }
+  await refresh()
+}
+
+onMounted(() => operation.attach())
 watch(() => props.serverDir, refresh, { immediate: true })
 watch(
   () => props.serverActive,
@@ -106,17 +147,19 @@ watch(
           <code>cloudcraft-backups</code> inside the server folder. These are not cloud backups.
         </p>
       </div>
-      <button
-        type="button"
-        :disabled="creating || serverActive || !serverDir.trim()"
-        @click="create"
-      >
-        {{ creating ? 'Creating…' : 'Back up world' }}
+      <button type="button" :disabled="busy || serverActive || !serverDir.trim()" @click="create">
+        {{ busy && operation.snapshot.value?.kind === 'backup' ? 'Backing up…' : 'Back up world' }}
       </button>
     </div>
     <p v-if="serverActive" class="backups-note" role="status">
       Stop the server before creating or restoring a backup so the world is consistent.
     </p>
+    <ServerOperationProgress
+      v-if="showProgress && operation.snapshot.value"
+      :snapshot="operation.snapshot.value"
+      :cancel-error="operation.cancelError.value"
+      @cancel="operation.cancel"
+    />
     <p v-if="message" class="backups-ok" role="status">{{ message }}</p>
     <p v-if="error" class="backups-error" role="alert">{{ error }}</p>
     <p v-if="!backups.length && !error" class="backups-empty">No backups yet.</p>
@@ -126,23 +169,41 @@ watch(
           <strong>{{ new Date(backup.createdAt).toLocaleString() }}</strong>
           <small>
             {{ backup.levelName }} · {{ backup.fileCount }} files ·
-            {{ formatSize(backup.totalBytes) }}
+            {{ formatBytes(backup.totalBytes) }}
           </small>
         </div>
         <div class="backups-actions">
-          <button type="button" :disabled="busyId === backup.id" @click="verify(backup)">
-            Verify
+          <button type="button" :disabled="busy" @click="verify(backup)">
+            {{ activeId === backup.id && busy ? 'Working…' : 'Verify' }}
+          </button>
+          <button type="button" :disabled="busy || serverActive" @click="restore(backup)">
+            Restore to new folder
           </button>
           <button
             type="button"
-            :disabled="busyId === backup.id || serverActive"
-            @click="restore(backup)"
+            :disabled="busy || serverActive"
+            :aria-label="`Delete backup from ${new Date(backup.createdAt).toLocaleString()}`"
+            @click="pendingDelete = backup"
           >
-            Restore to new folder
+            Delete…
           </button>
         </div>
       </li>
     </ul>
+    <ServerDeleteConfirm
+      v-if="pendingDelete"
+      title="Delete this backup"
+      :expected-name="pendingDelete.id"
+      :removes="[
+        `Backup ${pendingDelete.id} (${pendingDelete.fileCount} files, ${formatBytes(pendingDelete.totalBytes)})`,
+      ]"
+      :retains="['Your current world', 'All other backups']"
+      warning="This cannot be undone."
+      confirm-label="Delete backup"
+      :busy="deletingBackup"
+      @confirm="confirmDeleteBackup"
+      @cancel="pendingDelete = null"
+    />
   </section>
 </template>
 

@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 
+import type { OperationSnapshot } from './cloudcraftOperations'
+
 export type LocalServerLifecycle = 'stopped' | 'starting' | 'running' | 'stopping' | 'failed'
 
 export interface LocalServerConfig {
@@ -93,4 +95,63 @@ export async function verifyServerBackup(serverDir: string, backupId: string) {
 /** Restores into a new folder and returns its name; the current world is untouched. */
 export async function restoreServerBackup(serverDir: string, backupId: string) {
   return (await invoke('cloudcraft_server_backup_restore', { serverDir, backupId })) as string
+}
+
+export type { OperationSnapshot } from './cloudcraftOperations'
+
+export async function getOperationStatus() {
+  return (await invoke('cloudcraft_operation_status')) as OperationSnapshot | null
+}
+
+/** Rejects when the running operation is past the point where cancelling is safe. */
+export async function cancelOperation() {
+  return (await invoke('cloudcraft_operation_cancel')) as OperationSnapshot
+}
+
+export interface ServerDeletionPlan {
+  serverName: string
+  levelName: string | null
+  levelNameError: string | null
+  worldExists: boolean
+  worldFiles: number
+  worldBytes: number
+  worldBlocker: string | null
+  backups: ServerBackupSummary[]
+  backupBytes: number
+  configurationRemoves: string[]
+  configurationRetains: string[]
+  blockedReason: string | null
+}
+
+export type ServerDeleteTarget =
+  | { kind: 'configuration' }
+  | { kind: 'world' }
+  | { kind: 'backup'; id: string }
+
+export interface ServerDeletionResult {
+  target: string
+  name: string
+  complete: boolean
+  deletedFiles: number
+  deletedBytes: number
+  failures: string[]
+  retained: string[]
+  message: string
+}
+
+export async function getServerDeletionPlan(serverDir: string) {
+  return (await invoke('cloudcraft_server_delete_plan', { serverDir })) as ServerDeletionPlan
+}
+
+/** Deletes exactly one confirmed resource. The result comes from the backend, never assumed. */
+export async function deleteServerResource(
+  serverDir: string,
+  target: ServerDeleteTarget,
+  confirmation: string,
+) {
+  return (await invoke('cloudcraft_server_delete', {
+    serverDir,
+    target,
+    confirmation,
+  })) as ServerDeletionResult
 }
