@@ -59,3 +59,38 @@ export async function forceStopLocalServer() {
 export async function getLocalServerLogs() {
   return (await invoke('cloudcraft_server_logs')) as string[]
 }
+
+export interface ServerBackupSummary {
+  id: string
+  levelName: string
+  createdAt: string
+  totalBytes: number
+  fileCount: number
+}
+
+export interface ServerBackupVerifyReport {
+  id: string
+  ok: boolean
+  checkedFiles: number
+  problems: string[]
+}
+
+export async function createServerBackup(serverDir: string) {
+  return (await invoke('cloudcraft_server_backup_create', { serverDir })) as ServerBackupSummary
+}
+
+export async function listServerBackups(serverDir: string) {
+  return (await invoke('cloudcraft_server_backup_list', { serverDir })) as ServerBackupSummary[]
+}
+
+export async function verifyServerBackup(serverDir: string, backupId: string) {
+  return (await invoke('cloudcraft_server_backup_verify', {
+    serverDir,
+    backupId,
+  })) as ServerBackupVerifyReport
+}
+
+/** Restores into a new folder and returns its name; the current world is untouched. */
+export async function restoreServerBackup(serverDir: string, backupId: string) {
+  return (await invoke('cloudcraft_server_backup_restore', { serverDir, backupId })) as string
+}

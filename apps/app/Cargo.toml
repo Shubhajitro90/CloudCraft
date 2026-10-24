@@ -31,6 +31,7 @@ thiserror = "1.0"
 futures = "0.3"
 daedalus = { path = "../../packages/daedalus" }
 chrono = "0.4.26"
+sha2 = "0.10"
 
 dirs = "5.0.1"
 

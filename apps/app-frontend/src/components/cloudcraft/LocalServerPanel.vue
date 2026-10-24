@@ -12,6 +12,7 @@ import {
   type LocalServerConfig,
   type LocalServerStatus,
 } from '@/helpers/cloudcraftServer'
+import ServerBackupsPanel from './ServerBackupsPanel.vue'
 
 const LAST_DIRECTORY_KEY = 'cloudcraft.local-server-directory'
 const form = reactive<LocalServerConfig>({
@@ -425,6 +426,8 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
         {{ copied ? 'Copied!' : 'Copy address' }}
       </button>
     </div>
+
+    <ServerBackupsPanel :server-dir="form.serverDir" :server-active="active" />
 
     <details class="server-logs" :open="active">
       <summary>

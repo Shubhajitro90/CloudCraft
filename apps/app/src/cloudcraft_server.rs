@@ -1,3 +1,6 @@
+use crate::cloudcraft_server_backup::{
+    self as backup, BackupSummary, VerifyReport,
+};
 use chrono::{DateTime, Utc};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -683,6 +686,69 @@ pub async fn cloudcraft_server_logs() -> Result<Vec<String>, String> {
     tokio::task::spawn_blocking(server_logs)
         .await
         .map_err(|error| format!("Server log worker failed: {error}"))?
+}
+
+fn ensure_server_inactive() -> Result<(), String> {
+    let mut state = lock_state()?;
+    refresh_process(&mut state)?;
+    if is_active(state.lifecycle) {
+        return Err(
+            "Stop the local server before backing up or restoring its world."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+async fn run_backup_task<T, F>(task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || {
+        ensure_server_inactive()?;
+        task()
+    })
+    .await
+    .map_err(|error| format!("Backup worker failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn cloudcraft_server_backup_create(
+    server_dir: String,
+) -> Result<BackupSummary, String> {
+    run_backup_task(move || backup::create_backup(&server_dir)).await
+}
+
+#[tauri::command]
+pub async fn cloudcraft_server_backup_list(
+    server_dir: String,
+) -> Result<Vec<BackupSummary>, String> {
+    tokio::task::spawn_blocking(move || backup::list_backups(&server_dir))
+        .await
+        .map_err(|error| format!("Backup worker failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn cloudcraft_server_backup_verify(
+    server_dir: String,
+    backup_id: String,
+) -> Result<VerifyReport, String> {
+    tokio::task::spawn_blocking(move || {
+        backup::verify_backup(&server_dir, &backup_id)
+    })
+    .await
+    .map_err(|error| format!("Backup worker failed: {error}"))?
+}
+
+/// Restores into a new folder; the current world is never modified.
+#[tauri::command]
+pub async fn cloudcraft_server_backup_restore(
+    server_dir: String,
+    backup_id: String,
+) -> Result<String, String> {
+    run_backup_task(move || backup::restore_backup(&server_dir, &backup_id))
+        .await
 }
 
 /// Called by the desktop event loop so a launcher exit never abandons a child server.
