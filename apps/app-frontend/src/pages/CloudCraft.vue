@@ -6,7 +6,7 @@ import { RouterLink, useRouter } from 'vue-router'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 import { install as installProfile, list, run } from '@/helpers/profile'
 import { get as getSettings, set as setSettings } from '@/helpers/settings'
-import { cloudSessionProvider } from '@/helpers/cloudSession'
+import { cloudSessionProvider, cloudSessionStateLabel } from '@/helpers/cloudSession'
 import { cloudStorageProvider } from '@/helpers/cloudStorage'
 import LocalServerPanel from '@/components/cloudcraft/LocalServerPanel.vue'
 import {
@@ -69,6 +69,8 @@ const cloudSessionStatus = ref({
   message: 'Checking cloud gaming provider status…',
   canStart: false,
   canStop: false,
+  canCancel: false,
+  cleanupRequired: false,
 })
 const backupBusy = ref(false)
 const backupError = ref('')
@@ -165,6 +167,8 @@ async function loadCloudSessionStatus() {
       message: String(error?.message || error),
       canStart: false,
       canStop: false,
+      canCancel: false,
+      cleanupRequired: false,
     }
   }
 }
@@ -196,26 +200,25 @@ async function startCloudSession() {
 
   cloudSessionBusy.value = true
   cloudSessionError.value = ''
+  const poll = setInterval(loadCloudSessionStatus, 1000)
   try {
-    cloudSessionStatus.value = await cloudSessionProvider.startSession({
-      instancePath: instance.path,
-      gameVersion: instance.game_version,
-    })
+    cloudSessionStatus.value = await cloudSessionProvider.startSession(instance.game_version)
   } catch (error) {
     cloudSessionError.value = String(error?.message || error)
+    await loadCloudSessionStatus()
   } finally {
+    clearInterval(poll)
     cloudSessionBusy.value = false
   }
 }
 
 async function stopCloudSession() {
-  const sessionId = cloudSessionStatus.value.sessionId
-  if (!sessionId || !cloudSessionStatus.value.canStop || cloudSessionBusy.value) return
+  if (!cloudSessionStatus.value.canStop || cloudSessionBusy.value) return
 
   cloudSessionBusy.value = true
   cloudSessionError.value = ''
   try {
-    cloudSessionStatus.value = await cloudSessionProvider.stopSession(sessionId)
+    cloudSessionStatus.value = await cloudSessionProvider.stopSession()
   } catch (error) {
     cloudSessionError.value = String(error?.message || error)
   } finally {
@@ -224,17 +227,13 @@ async function stopCloudSession() {
 }
 
 async function cancelCloudSessionStart() {
-  if (cloudSessionStatus.value.state !== 'starting' || cloudSessionBusy.value) return
+  if (!cloudSessionStatus.value.canCancel) return
 
-  cloudSessionBusy.value = true
   cloudSessionError.value = ''
   try {
-    await cloudSessionProvider.cancelStart()
-    await loadCloudSessionStatus()
+    cloudSessionStatus.value = await cloudSessionProvider.cancelStart()
   } catch (error) {
     cloudSessionError.value = String(error?.message || error)
-  } finally {
-    cloudSessionBusy.value = false
   }
 }
 
@@ -548,17 +547,16 @@ function addSaveNote() {
             <h3 class="m-0 text-lg font-semibold">Cloud gaming</h3>
           </div>
           <span class="status-pill muted">
-            {{
-              cloudSessionStatus.state === 'unavailable'
-                ? 'Not configured'
-                : cloudSessionStatus.state
-            }}
+            {{ cloudSessionStateLabel(cloudSessionStatus.state) }}
           </span>
         </div>
-        <p class="mt-3 text-secondary">{{ cloudSessionStatus.message }}</p>
+        <p class="mt-3 text-secondary" role="status">{{ cloudSessionStatus.message }}</p>
+        <p v-if="cloudSessionStatus.cleanupRequired" class="inline-error" role="alert">
+          Remote resources may still exist for this session. Stop it to release them.
+        </p>
         <p class="m-0 text-sm text-secondary">
-          The provider boundary defines unavailable, starting, ready, stopping, stopped, and error
-          states. No remote machine is started and no provider credentials are configured.
+          Session state is tracked by the CloudCraft backend. Streaming a remote game requires a
+          real provider, and none is integrated yet.
         </p>
         <div class="cloud-controls">
           <label for="cloud-instance">Instance for a future remote session</label>
@@ -584,19 +582,21 @@ function addSaveNote() {
               {{ cloudSessionBusy ? 'Working…' : 'Start cloud session' }}
             </button>
             <button
-              v-if="cloudSessionStatus.canStop && cloudSessionStatus.sessionId"
+              v-if="cloudSessionStatus.canStop"
               class="secondary-action"
               type="button"
               :disabled="cloudSessionBusy"
               @click="stopCloudSession"
             >
-              Stop cloud session
+              {{
+                cloudSessionStatus.cleanupRequired ? 'Release remote resources' : 'Stop cloud session'
+              }}
             </button>
             <button
               v-if="cloudSessionStatus.state === 'starting'"
               class="secondary-action"
               type="button"
-              :disabled="cloudSessionBusy"
+              :disabled="!cloudSessionStatus.canCancel"
               @click="cancelCloudSessionStart"
             >
               Cancel startup

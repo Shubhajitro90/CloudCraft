@@ -8,6 +8,7 @@ use tauri::{Listener, Manager};
 use theseus::prelude::*;
 
 mod api;
+mod cloudcraft_cloud_session;
 mod cloudcraft_server;
 mod cloudcraft_server_backup;
 mod cloudcraft_server_delete;
@@ -665,6 +666,10 @@ fn main() {
             restart_app,
             cloudcraft_backup_world,
             cloudcraft_restore_world,
+            cloudcraft_cloud_session::cloudcraft_cloud_session_status,
+            cloudcraft_cloud_session::cloudcraft_cloud_session_start,
+            cloudcraft_cloud_session::cloudcraft_cloud_session_cancel_start,
+            cloudcraft_cloud_session::cloudcraft_cloud_session_stop,
             cloudcraft_server::cloudcraft_server_configure,
             cloudcraft_server::cloudcraft_server_load,
             cloudcraft_server::cloudcraft_server_start,

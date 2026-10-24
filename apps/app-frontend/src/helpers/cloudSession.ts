@@ -1,63 +1,49 @@
+import { invoke } from '@tauri-apps/api/core'
+
 export type CloudSessionState =
   | 'unavailable'
+  | 'idle'
   | 'starting'
   | 'ready'
   | 'stopping'
   | 'stopped'
   | 'error'
 
-export interface CloudSessionRequest {
-  instancePath: string
-  gameVersion?: string
-}
-
 export interface CloudSessionStatus {
   state: CloudSessionState
   message: string
-  sessionId?: string
+  sessionId?: string | null
   providerId?: string
-  updatedAt?: string
+  updatedAt?: string | null
   canStart: boolean
   canStop: boolean
+  canCancel: boolean
+  cleanupRequired: boolean
 }
 
 /**
- * Provider boundary for a future remote graphical Minecraft client.
- *
- * This is deliberately not connected to a provider yet. The default
- * implementation never creates a VM, starts a remote game, or uploads saves.
+ * Thin client for the Rust session manager. All state, validation, timeouts and
+ * cleanup live in the backend; this module only forwards commands and returns the
+ * backend's snapshot. Until a real provider is integrated the backend reports
+ * `unavailable` and never creates remote resources.
  */
-export interface CloudSessionProvider {
-  getStatus(): Promise<CloudSessionStatus>
-  startSession(request: CloudSessionRequest): Promise<CloudSessionStatus>
-  stopSession(sessionId: string): Promise<CloudSessionStatus>
-  cancelStart(): Promise<void>
+export const cloudSessionProvider = {
+  getStatus: () => invoke<CloudSessionStatus>('cloudcraft_cloud_session_status'),
+  startSession: (gameVersion?: string) =>
+    invoke<CloudSessionStatus>('cloudcraft_cloud_session_start', {
+      gameVersion: gameVersion || null,
+    }),
+  cancelStart: () => invoke<CloudSessionStatus>('cloudcraft_cloud_session_cancel_start'),
+  stopSession: () => invoke<CloudSessionStatus>('cloudcraft_cloud_session_stop'),
 }
 
-class UnconfiguredCloudSessionProvider implements CloudSessionProvider {
-  async getStatus(): Promise<CloudSessionStatus> {
-    return {
-      state: 'unavailable',
-      message:
-        'Cloud gaming is not configured. Minecraft will run locally through the existing launcher.',
-      canStart: false,
-      canStop: false,
-    }
-  }
-
-  async startSession(_request: CloudSessionRequest): Promise<CloudSessionStatus> {
-    throw new Error('No cloud gaming provider is configured. No remote resources were created.')
-  }
-
-  async stopSession(_sessionId: string): Promise<CloudSessionStatus> {
-    throw new Error(
-      'No cloud gaming provider is configured, so there is no remote session to stop.',
-    )
-  }
-
-  async cancelStart(): Promise<void> {
-    // There is no configured provider and therefore no startup operation to cancel.
+export function cloudSessionStateLabel(state: CloudSessionState): string {
+  switch (state) {
+    case 'unavailable':
+      return 'Not configured'
+    case 'idle':
+      return 'Ready to start'
+    default:
+      return state.charAt(0).toUpperCase() + state.slice(1)
   }
 }
-
-export const cloudSessionProvider: CloudSessionProvider = new UnconfiguredCloudSessionProvider()
