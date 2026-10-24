@@ -17,12 +17,21 @@
         <router-link :to="`/instance/${encodeURIComponent(selectedProcess.profile.path)}`">
           {{ selectedProcess.profile.name }}
         </router-link>
-        <div v-if="currentProcesses.length > 1" class="arrow button-base" :class="{ rotate: showProfiles }"
-          @click="toggleProfiles()">
+        <div
+          v-if="currentProcesses.length > 1"
+          class="arrow button-base"
+          :class="{ rotate: showProfiles }"
+          @click="toggleProfiles()"
+        >
           <DropdownIcon />
         </div>
       </div>
-      <Button v-tooltip="'Stop instance'" icon-only class="icon-button stop" @click="stop(selectedProcess)">
+      <Button
+        v-tooltip="'Stop instance'"
+        icon-only
+        class="icon-button stop"
+        @click="stop(selectedProcess)"
+      >
         <StopCircleIcon />
       </Button>
       <Button v-tooltip="'View logs'" icon-only class="icon-button" @click="goToTerminal()">
@@ -35,38 +44,40 @@
     </div>
     <div v-if="updateState">
       <a>
-        <Button class="download" :disabled="installState" @click="confirmUpdating(), getRemote(false, false)">
+        <Button
+          class="download"
+          :disabled="installState"
+          @click="(confirmUpdating(), getRemote(false, false))"
+        >
           <DownloadIcon />
-          {{
-            installState
-              ? "Downloading new update..."
-              : "Download new update"
-          }}
+          {{ installState ? 'Downloading new update...' : 'Download new update' }}
         </Button>
       </a>
     </div>
-    <ModalWrapper ref="confirmUpdate" :has-to-type="false" header="Request to update the AstralRinth launcher">
+    <ModalWrapper ref="confirmUpdate" :has-to-type="false" header="Request to update CloudCraft">
       <div class="modal-body">
         <div class="markdown-body">
-          <p>The new version of the AstralRinth launcher is available.</p>
+          <p>A new CloudCraft version is available.</p>
           <p>Your version is outdated. We recommend that you update to the latest version.</p>
           <p>Warning:</p>
           <p>
-            Before updating, make sure that you have saved all running instances and made a backup copy of the instances
-            that are valuable to you. Remember that the authors of the product are not responsible for the breakdown of
-            your files, so you should always make copies of them and keep them in a safe place.
+            Before updating, make sure that you have saved all running instances and made a backup
+            copy of the instances that are valuable to you. Remember that the authors of the product
+            are not responsible for the breakdown of your files, so you should always make copies of
+            them and keep them in a safe place.
           </p>
         </div>
-        <span>Version on remote server • <p id="releaseData" class="cosmic inline-fix"></p></span>
-        <span>Version on local device •
+        <span
+          >Version on remote server •
+          <p id="releaseData" class="cosmic inline-fix"></p
+        ></span>
+        <span
+          >Version on local device •
           <p class="cosmic inline-fix">v{{ version }}</p>
         </span>
         <div class="button-group push-right">
-          <Button class="download-modal" @click="confirmUpdate.hide()">
-            Decline</Button>
-          <Button class="download-modal" @click="approveUpdate()">
-            Accept
-          </Button>
+          <Button class="download-modal" @click="confirmUpdate.hide()"> Decline</Button>
+          <Button class="download-modal" @click="approveUpdate()"> Accept </Button>
         </div>
       </div>
     </ModalWrapper>
@@ -85,14 +96,32 @@
     </Card>
   </transition>
   <transition name="download">
-    <Card v-if="showProfiles === true && currentProcesses.length > 0" ref="profiles" class="profile-card">
-      <Button v-for="process in currentProcesses" :key="process.uuid" class="profile-button"
-        @click="selectProcess(process)">
+    <Card
+      v-if="showProfiles === true && currentProcesses.length > 0"
+      ref="profiles"
+      class="profile-card"
+    >
+      <Button
+        v-for="process in currentProcesses"
+        :key="process.uuid"
+        class="profile-button"
+        @click="selectProcess(process)"
+      >
         <div class="text"><span class="circle running" /> {{ process.profile.name }}</div>
-        <Button v-tooltip="'Stop instance'" icon-only class="icon-button stop" @click.stop="stop(process)">
+        <Button
+          v-tooltip="'Stop instance'"
+          icon-only
+          class="icon-button stop"
+          @click.stop="stop(process)"
+        >
           <StopCircleIcon />
         </Button>
-        <Button v-tooltip="'View logs'" icon-only class="icon-button" @click.stop="goToTerminal(process.profile.path)">
+        <Button
+          v-tooltip="'View logs'"
+          icon-only
+          class="icon-button"
+          @click.stop="goToTerminal(process.profile.path)"
+        >
           <TerminalSquareIcon />
         </Button>
       </Button>
@@ -119,11 +148,10 @@ import { handleError } from '@/store/notifications.js'
 import { get_many } from '@/helpers/profile.js'
 import { trackEvent } from '@/helpers/analytics'
 import { getVersion } from '@tauri-apps/api/app'
-
-const version = await getVersion()
-
 import { installState, getRemote, updateState } from '@/helpers/update.js'
 import ModalWrapper from './modal/ModalWrapper.vue'
+
+const version = await getVersion()
 
 const confirmUpdate = ref(null)
 

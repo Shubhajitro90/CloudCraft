@@ -1,8 +1,7 @@
 <script setup>
-import { computed, ref, onMounted, watch, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import {
-  ArrowBigUpDashIcon,
   LogInIcon,
   HomeIcon,
   LibraryIcon,
@@ -49,7 +48,6 @@ import { get_opening_command, initialize_state } from '@/helpers/state'
 import { saveWindowState, StateFlags } from '@tauri-apps/plugin-window-state'
 import { renderString } from '@modrinth/utils'
 import { useFetch } from '@/helpers/fetch.js'
-import { check } from '@tauri-apps/plugin-updater'
 import NavButton from '@/components/ui/NavButton.vue'
 import { get as getCreds, logout, login } from '@/helpers/mr_auth.js'
 import { get_user } from '@/helpers/cache.js'
@@ -122,7 +120,6 @@ async function setupApp() {
     feature_flags,
   } = settings
 
-
   if (default_page === 'Library') {
     await router.push('/library')
   }
@@ -150,11 +147,11 @@ async function setupApp() {
 
   initAnalytics()
   if (!telemetry) {
-    console.info("[AR] Telemetry disabled by default (Hard patched).")
+    console.info('[AR] Telemetry disabled by default (Hard patched).')
     optOutAnalytics()
   }
   if (!personalized_ads) {
-    console.info("[AR] Personalized ads disabled by default (Hard patched).")
+    console.info('[AR] Personalized ads disabled by default (Hard patched).')
   }
 
   if (dev) debugAnalytics()
@@ -386,6 +383,13 @@ function handleAuxClick(e) {
     >
       <NavButton v-tooltip.right="'Home'" to="/">
         <HomeIcon />
+      </NavButton>
+      <NavButton
+        v-tooltip.right="'CloudCraft hub'"
+        to="/cloudcraft"
+        :is-primary="() => route.path === '/cloudcraft'"
+      >
+        <img src="/cloudcraft.svg" alt="" class="w-5 h-5" />
       </NavButton>
       <NavButton
         v-tooltip.right="'Discover content'"

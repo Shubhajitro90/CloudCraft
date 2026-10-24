@@ -1,13 +1,14 @@
-name: 'AstralRinth App build'
+name: 'CloudCraft desktop build'
 on:
   push:
     branches:
       - feature*
+      - cloudcraft-implementation
     tags:
       - 'build*'
       - 'v*'
     paths:
-      - .github/workflows/app-release.yml
+      - .github/workflows/theseus-release.yml
       - 'apps/app/**'
       - 'apps/app-frontend/**'
       - 'packages/app-lib/**'
@@ -122,10 +123,11 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
-      - name: upload ${{ matrix.platform }}
+      - name: Upload CloudCraft installer artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.platform }}
+          name: CloudCraft-${{ matrix.platform }}
+          if-no-files-found: error
           path: |
             target/*/release/bundle/*/*.dmg
             target/*/release/bundle/*/*.app.tar.gz

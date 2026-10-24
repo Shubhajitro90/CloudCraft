@@ -43,9 +43,9 @@
       }
     ]
   },
-  "productName": "AstralRinth App",
+  "productName": "CloudCraft",
   "version": "0.9.204",
-  "mainBinaryName": "AstralRinth App",
+  "mainBinaryName": "CloudCraft",
   "identifier": "AstralRinthApp",
   "plugins": {
     "deep-link": {
@@ -65,7 +65,7 @@
         "fullscreen": false,
         "height": 800,
         "resizable": true,
-        "title": "AstralRinth",
+        "title": "CloudCraft",
         "width": 1280,
         "minHeight": 700,
         "minWidth": 1100,

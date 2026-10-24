@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import {
   ReportIcon,
-  AstralRinthLogo,
   ShieldIcon,
   SettingsIcon,
   GaugeIcon,
@@ -143,10 +142,10 @@ function devModeCount() {
               :class="{ 'text-brand': themeStore.devMode, 'text-secondary': !themeStore.devMode }"
               @click="devModeCount"
             >
-              <AstralRinthLogo class="w-6 h-6" />
+              <img src="/cloudcraft.svg" alt="CloudCraft" class="w-6 h-6 rounded-md" />
             </button>
             <div>
-              <p class="m-0">AstralRinth App {{ version }}</p>
+              <p class="m-0">CloudCraft {{ version }}</p>
               <p class="m-0">
                 <span v-if="osPlatform === 'macos'">MacOS</span>
                 <span v-else class="capitalize">{{ osPlatform }}</span>
