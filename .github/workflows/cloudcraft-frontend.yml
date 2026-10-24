@@ -70,6 +70,12 @@ jobs:
             apps/app-frontend/src/components/ui/modal/AppSettingsModal.vue \
             apps/app-frontend/src/components/ui/modal/ConfirmModalWrapper.vue \
             apps/app-frontend/src/components/cloudcraft/ServerBackupsPanel.vue \
+            apps/app-frontend/src/components/cloudcraft/ServerDeleteConfirm.vue \
+            apps/app-frontend/src/components/cloudcraft/ServerDeletePanel.vue \
+            apps/app-frontend/src/components/cloudcraft/ServerOperationProgress.vue \
+            apps/app-frontend/src/helpers/cloudcraftOperations.ts \
+            apps/app-frontend/src/helpers/cloudcraftOperations.test.mjs \
+            apps/app-frontend/src/helpers/useServerOperation.ts \
             apps/app-frontend/src/helpers/cloudcraftServer.ts \
             apps/app-frontend/src/helpers/cloudSession.ts \
             apps/app-frontend/src/helpers/cloudStorage.ts \
@@ -88,6 +94,11 @@ jobs:
             src/components/ui/modal/AppSettingsModal.vue \
             src/components/ui/modal/ConfirmModalWrapper.vue \
             src/components/cloudcraft/ServerBackupsPanel.vue \
+            src/components/cloudcraft/ServerDeleteConfirm.vue \
+            src/components/cloudcraft/ServerDeletePanel.vue \
+            src/components/cloudcraft/ServerOperationProgress.vue \
+            src/helpers/cloudcraftOperations.ts \
+            src/helpers/useServerOperation.ts \
             src/helpers/cloudcraftServer.ts \
             src/helpers/cloudSession.ts \
             src/helpers/cloudStorage.ts \
@@ -102,6 +113,14 @@ jobs:
 
       - name: Production frontend build
         run: pnpm --filter @modrinth/app-frontend run build
+
+      - name: Use Node 22 for TypeScript test runner
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Frontend operation logic tests
+        run: node --experimental-strip-types --test apps/app-frontend/src/helpers/cloudcraftOperations.test.mjs
 
   rust:
     name: Rust formatting and local-backup safety tests
