@@ -8,6 +8,7 @@ use tauri::{Listener, Manager};
 use theseus::prelude::*;
 
 mod api;
+mod cloudcraft_server;
 mod error;
 
 #[cfg(target_os = "macos")]
@@ -37,7 +38,6 @@ async fn initialize_state(app: tauri::AppHandle) -> api::Result<()> {
     //     let update_fut = updater.check();
 
     // tracing::info!("Initializing app state...");
-    State::init().await?;
 
     //     let check_bar = theseus::init_loading(
     //         theseus::LoadingBarType::CheckingForUpdates,
@@ -662,6 +662,13 @@ fn main() {
             restart_app,
             cloudcraft_backup_world,
             cloudcraft_restore_world,
+            cloudcraft_server::cloudcraft_server_configure,
+            cloudcraft_server::cloudcraft_server_load,
+            cloudcraft_server::cloudcraft_server_start,
+            cloudcraft_server::cloudcraft_server_status,
+            cloudcraft_server::cloudcraft_server_stop,
+            cloudcraft_server::cloudcraft_server_force_stop,
+            cloudcraft_server::cloudcraft_server_logs,
         ]);
 
     #[cfg(target_os = "macos")]
@@ -676,6 +683,10 @@ fn main() {
         Ok(app) => {
             #[allow(unused_variables)]
             app.run(|app, event| {
+                if let tauri::RunEvent::ExitRequested { .. } = &event {
+                    cloudcraft_server::shutdown();
+                }
+
                 #[cfg(target_os = "macos")]
                 if let tauri::RunEvent::Opened { urls } = event {
                     tracing::info!("Handling webview open {urls:?}");
