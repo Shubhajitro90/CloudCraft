@@ -79,6 +79,8 @@ Branch: `cloudcraft-implementation`. Status entries distinguish code presence fr
 | Artifacts | `CloudCraft_0.9.204_x64-setup.exe` (NSIS) and `_x64_en-US.msi`; `CloudCraft_0.9.204_universal.dmg`; `CloudCraft_0.9.204_amd64.AppImage`, `.deb`, `-1.x86_64.rpm`. GitHub Actions artifacts expire per repository retention settings |
 | Desktop run | NOT done. The sandbox cannot run the AppImage (glibc older than the build, no display or GTK stack). The backup panel and deletion workflow have not been exercised in a running app |
 
+| Re-check at `cd51f66f` (v0 sandbox, 2026-10-24) | Node logic tests 9/9 passed and `vue-tsc --noEmit` reported no errors. Rust was NOT run: the sandbox has no `cargo`, no display, and no Minecraft account, so no Rust test, desktop launch, or installer run was possible. No feature status above changed. |
+
 ## Provider research (unconfirmed leads)
 
 These come from web-search summaries on 2026-10-24, not from reading the providers' own documents. Confirm each against the first-party page before relying on it. No provider code was written.
