@@ -9,10 +9,17 @@ import {
   install as installProfile,
   kill as killProfile,
   list,
+  remove as removeProfile,
   run,
 } from '@/helpers/profile'
 import { get_by_profile_path } from '@/helpers/process'
-import { get_max_memory, test_jre } from '@/helpers/jre'
+import { auto_install_java, get_max_memory, test_jre } from '@/helpers/jre'
+import {
+  deleteInstance as deleteWithGuard,
+  installRequiredJava,
+} from '@/helpers/cloudcraftInstances'
+import LauncherAccountPanel from '@/components/cloudcraft/LauncherAccountPanel.vue'
+import CreateInstanceForm from '@/components/cloudcraft/CreateInstanceForm.vue'
 import { get_default_user } from '@/helpers/auth'
 import { process_listener } from '@/helpers/events'
 import {
@@ -169,10 +176,13 @@ async function launchInstance(instance) {
   if (!instance?.path || launchingPath.value || runningPaths.value[instance.path]) return
   launchingPath.value = instance.path
   launchError.value = ''
+  javaFixPath.value = ''
   try {
     const outcome = await launchWithPreflight(instance, launcherDeps)
     if (outcome.kind === 'blocked') {
       launchError.value = outcome.issues.map((issue) => issue.message).join(' ')
+      if (outcome.issues.some((issue) => issue.code === 'no_java'))
+        javaFixPath.value = instance.path
     } else if (outcome.kind === 'failed') {
       launchError.value = `Launch failed: ${outcome.message}`
       await loadInstances()
@@ -195,6 +205,56 @@ async function stopGame(instance) {
   } finally {
     stoppingPath.value = ''
     await refreshRunning()
+  }
+}
+
+const javaFixPath = ref('')
+const javaBusy = ref(false)
+const confirmDeletePath = ref('')
+const deletingPath = ref('')
+
+async function fixJava(instance) {
+  if (javaBusy.value) return
+  javaBusy.value = true
+  launchError.value = ''
+  installMessage.value = ''
+  try {
+    const result = await installRequiredJava(instance.path, {
+      getOptimalJre: get_optimal_jre_key,
+      autoInstallJava: auto_install_java,
+    })
+    if (result.installed) {
+      installMessage.value = `${result.message} You can launch ${instance.name || 'the instance'} now.`
+      javaFixPath.value = ''
+    } else {
+      launchError.value = result.message
+    }
+  } finally {
+    javaBusy.value = false
+  }
+}
+
+async function removeInstance(instance) {
+  if (deletingPath.value) return
+  if (confirmDeletePath.value !== instance.path) {
+    confirmDeletePath.value = instance.path
+    return
+  }
+  deletingPath.value = instance.path
+  installError.value = ''
+  installMessage.value = ''
+  try {
+    const result = await deleteWithGuard(instance, {
+      remove: removeProfile,
+      processesFor: get_by_profile_path,
+    })
+    if (result.deleted) installMessage.value = result.message
+    else installError.value = result.message
+    await loadInstances()
+    if (cloudInstancePath.value === instance.path) cloudInstancePath.value = ''
+  } finally {
+    deletingPath.value = ''
+    confirmDeletePath.value = ''
   }
 }
 
@@ -833,10 +893,27 @@ function addSaveNote() {
           </div>
         </div>
         <p class="mt-3 text-secondary">
-          These profiles come from the existing launcher backend. Launching uses the normal launcher
-          process and account flow.
+          Create, install, repair, launch and delete real Minecraft instances. Launching needs a
+          signed-in Microsoft account that owns Minecraft and a compatible Java runtime.
         </p>
+        <div class="launcher-grid">
+          <LauncherAccountPanel @change="loadInstances" />
+          <CreateInstanceForm :instances="instances" @created="loadInstances" />
+        </div>
         <p v-if="instanceError" class="inline-error" role="alert">{{ instanceError }}</p>
+        <div v-if="javaFixPath" class="java-fix" role="status">
+          <span>No compatible Java runtime was found for this instance.</span>
+          <button
+            class="secondary-action"
+            type="button"
+            :disabled="javaBusy"
+            @click="
+              fixJava(instances.find((item) => item.path === javaFixPath) || { path: javaFixPath })
+            "
+          >
+            {{ javaBusy ? 'Installing Java…' : 'Install required Java' }}
+          </button>
+        </div>
         <p v-if="installError" class="inline-error" role="alert" aria-live="assertive">
           {{ installError }}
         </p>
@@ -895,14 +972,29 @@ function addSaveNote() {
               <button class="secondary-action" type="button" @click="openInstance(instance)">
                 Details
               </button>
+              <button
+                class="secondary-action danger-action"
+                type="button"
+                :disabled="!!deletingPath || !!installingPath || runningPaths[instance.path]"
+                @click="removeInstance(instance)"
+                @blur="confirmDeletePath = ''"
+              >
+                {{
+                  deletingPath === instance.path
+                    ? 'Deleting…'
+                    : confirmDeletePath === instance.path
+                      ? 'Confirm delete'
+                      : 'Delete'
+                }}
+              </button>
             </div>
           </article>
         </div>
         <div v-else class="empty-state">
           <span class="feature-icon"><LibraryIcon /></span><strong>No instances found</strong
           ><span class="text-sm text-secondary"
-            >Create one with the launcher's existing instance wizard.</span
-          ><RouterLink class="primary-action" to="/library">Open library</RouterLink>
+            >Use the form above to create and install your first instance.</span
+          >
         </div>
       </section>
     </template>
@@ -1263,6 +1355,27 @@ function addSaveNote() {
 </template>
 
 <style scoped>
+.launcher-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.java-fix {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #fbbf24;
+  border-radius: 0.75rem;
+}
+.danger-action:hover:not(:disabled) {
+  border-color: #f87171;
+  color: #f87171;
+}
 .cloudcraft-page {
   min-height: 100%;
   color: var(--color-base);

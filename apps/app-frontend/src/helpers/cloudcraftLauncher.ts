@@ -113,17 +113,21 @@ export async function preflightLaunch(
   if (!java?.path) {
     issues.push({
       code: 'no_java',
-      message: `No compatible Java runtime was found for Minecraft ${instance.game_version ?? ''}. Install one from Performance settings.`.replace(
-        '  ',
-        ' ',
-      ),
+      message:
+        `No compatible Java runtime was found for Minecraft ${instance.game_version ?? ''}. Install one from Performance settings.`.replace(
+          '  ',
+          ' ',
+        ),
     })
   }
 
   const settings = await deps.getSettings().catch(() => null)
   if (settings?.memory) {
     const systemKib = await deps.getMaxMemoryKib().catch(() => 0)
-    const memoryIssues = validateMemory(settings.memory, systemKib ? Math.floor(systemKib / 1024) : null)
+    const memoryIssues = validateMemory(
+      settings.memory,
+      systemKib ? Math.floor(systemKib / 1024) : null,
+    )
     for (const message of memoryIssues) issues.push({ code: 'memory', message })
   }
   return issues

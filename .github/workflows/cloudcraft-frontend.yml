@@ -73,6 +73,12 @@ jobs:
             apps/app-frontend/src/components/cloudcraft/ServerDeleteConfirm.vue \
             apps/app-frontend/src/components/cloudcraft/ServerDeletePanel.vue \
             apps/app-frontend/src/components/cloudcraft/ServerOperationProgress.vue \
+            apps/app-frontend/src/components/cloudcraft/LauncherAccountPanel.vue \
+            apps/app-frontend/src/components/cloudcraft/CreateInstanceForm.vue \
+            apps/app-frontend/src/helpers/cloudcraftInstances.ts \
+            apps/app-frontend/src/helpers/cloudcraftInstances.test.mjs \
+            apps/app-frontend/src/helpers/cloudcraftLauncher.ts \
+            apps/app-frontend/src/helpers/cloudcraftLauncher.test.mjs \
             apps/app-frontend/src/helpers/cloudcraftOperations.ts \
             apps/app-frontend/src/helpers/cloudcraftOperations.test.mjs \
             apps/app-frontend/src/helpers/useServerOperation.ts \
@@ -120,7 +126,11 @@ jobs:
           node-version: 22
 
       - name: Frontend operation logic tests
-        run: node --experimental-strip-types --test apps/app-frontend/src/helpers/cloudcraftOperations.test.mjs
+        run: |
+          node --experimental-strip-types --test \
+            apps/app-frontend/src/helpers/cloudcraftOperations.test.mjs \
+            apps/app-frontend/src/helpers/cloudcraftLauncher.test.mjs \
+            apps/app-frontend/src/helpers/cloudcraftInstances.test.mjs
 
   rust:
     name: Rust formatting and local-backup safety tests
