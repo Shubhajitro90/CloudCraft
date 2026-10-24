@@ -14,7 +14,6 @@ on:
       - packages/assets/**
       - packages/ui/**
       - packages/utils/**
-  workflow_dispatch:
   push:
     branches: [cloudcraft-implementation, v0/status-recheck]
     paths:
