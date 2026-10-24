@@ -194,10 +194,13 @@ export interface ProcessEvent {
 export type RunningMap = Record<string, true>
 
 export function applyProcessEvent(running: RunningMap, event: ProcessEvent): RunningMap {
-  const next = { ...running }
-  if (event.event === 'launched') next[event.profile_path_id] = true
-  else if (event.event === 'finished') delete next[event.profile_path_id]
-  return next
+  if (event.event === 'launched') return { ...running, [event.profile_path_id]: true }
+  if (event.event === 'finished') {
+    return Object.fromEntries(
+      Object.entries(running).filter(([path]) => path !== event.profile_path_id),
+    ) as RunningMap
+  }
+  return { ...running }
 }
 
 export async function reconcileRunning(

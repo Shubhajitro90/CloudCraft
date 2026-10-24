@@ -25,10 +25,8 @@ import { process_listener } from '@/helpers/events'
 import {
   applyProcessEvent,
   launchInstance as launchWithPreflight,
-  playability,
   reconcileRunning,
   stopInstance as stopWithConfirmation,
-  validateMemory,
 } from '@/helpers/cloudcraftLauncher'
 import { get as getSettings, set as setSettings } from '@/helpers/settings'
 import { cloudSessionProvider, cloudSessionStateLabel } from '@/helpers/cloudSession'
@@ -935,15 +933,26 @@ function addSaveNote() {
               </p>
               <p class="m-0 mt-1 text-xs text-secondary">
                 {{
-                  instance.install_stage === 'installed'
-                    ? 'Ready to play'
-                    : 'Needs installation or repair'
+                  runningPaths[instance.path]
+                    ? 'Running'
+                    : instance.install_stage === 'installed'
+                      ? 'Ready to play'
+                      : 'Needs installation or repair'
                 }}
               </p>
             </div>
             <div class="flex flex-wrap gap-2">
               <button
-                v-if="instance.install_stage === 'installed'"
+                v-if="runningPaths[instance.path]"
+                class="primary-action"
+                type="button"
+                :disabled="stoppingPath === instance.path"
+                @click="stopGame(instance)"
+              >
+                {{ stoppingPath === instance.path ? 'Stopping…' : 'Stop' }}
+              </button>
+              <button
+                v-else-if="instance.install_stage === 'installed'"
                 class="primary-action"
                 type="button"
                 :disabled="!!launchingPath || !!installingPath"

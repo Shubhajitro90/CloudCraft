@@ -103,6 +103,10 @@ jobs:
             src/components/cloudcraft/ServerDeleteConfirm.vue \
             src/components/cloudcraft/ServerDeletePanel.vue \
             src/components/cloudcraft/ServerOperationProgress.vue \
+            src/components/cloudcraft/LauncherAccountPanel.vue \
+            src/components/cloudcraft/CreateInstanceForm.vue \
+            src/helpers/cloudcraftInstances.ts \
+            src/helpers/cloudcraftLauncher.ts \
             src/helpers/cloudcraftOperations.ts \
             src/helpers/useServerOperation.ts \
             src/helpers/cloudcraftServer.ts \

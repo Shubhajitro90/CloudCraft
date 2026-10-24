@@ -29,7 +29,11 @@ export interface ExistingInstance {
 }
 
 export const MAX_INSTANCE_NAME_LENGTH = 64
-const FORBIDDEN_NAME_CHARACTERS = /[<>:"/\\|?*\u0000-\u001f]/
+const FORBIDDEN_NAME_CHARACTERS = /[<>:"/\\|?*]/
+
+function hasControlCharacter(value: string): boolean {
+  return [...value].some((character) => character.charCodeAt(0) < 32)
+}
 const RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i
 
 export function validateInstanceName(name: string, existing: ExistingInstance[]): string {
@@ -38,7 +42,7 @@ export function validateInstanceName(name: string, existing: ExistingInstance[])
   if (trimmed.length > MAX_INSTANCE_NAME_LENGTH) {
     return `Use ${MAX_INSTANCE_NAME_LENGTH} characters or fewer.`
   }
-  if (FORBIDDEN_NAME_CHARACTERS.test(trimmed)) {
+  if (FORBIDDEN_NAME_CHARACTERS.test(trimmed) || hasControlCharacter(trimmed)) {
     return 'The name cannot contain < > : " / \\ | ? * or control characters.'
   }
   if (
