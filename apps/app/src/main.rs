@@ -13,6 +13,8 @@ mod cloudcraft_server;
 mod cloudcraft_server_backup;
 mod cloudcraft_server_delete;
 mod cloudcraft_server_ops;
+mod cloudcraft_server_software;
+mod cloudcraft_server_world;
 mod error;
 
 #[cfg(target_os = "macos")]
@@ -677,6 +679,13 @@ fn main() {
             cloudcraft_server::cloudcraft_server_stop,
             cloudcraft_server::cloudcraft_server_force_stop,
             cloudcraft_server::cloudcraft_server_logs,
+            cloudcraft_server::cloudcraft_server_restart,
+            cloudcraft_server::cloudcraft_server_software_versions,
+            cloudcraft_server::cloudcraft_server_software_resolve,
+            cloudcraft_server::cloudcraft_server_software_download,
+            cloudcraft_server::cloudcraft_server_world_export,
+            cloudcraft_server::cloudcraft_server_world_import,
+            cloudcraft_server::cloudcraft_server_world_activate,
             cloudcraft_server::cloudcraft_server_backup_create,
             cloudcraft_server::cloudcraft_server_backup_list,
             cloudcraft_server::cloudcraft_server_backup_verify,

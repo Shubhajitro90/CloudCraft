@@ -8,6 +8,12 @@ use crate::cloudcraft_server_delete::{
 use crate::cloudcraft_server_ops::{
     self as ops, OpError, OperationKind, OperationSnapshot, Tracker,
 };
+use crate::cloudcraft_server_software::{
+    self as software, DownloadedSoftware, ResolvedSoftware, SoftwareKind,
+};
+use crate::cloudcraft_server_world::{
+    self as world, WorldExportResult, WorldImportResult,
+};
 use chrono::{DateTime, Utc};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -499,6 +505,21 @@ where
     });
 }
 
+/// Reachability is judged by whether anything answers on the port, so a
+/// server must never be started on a port another program already holds;
+/// otherwise a crashed start would look like a healthy one.
+fn ensure_port_available(port: u16) -> Result<(), String> {
+    match std::net::TcpListener::bind(("127.0.0.1", port)) {
+        Ok(listener) => {
+            drop(listener);
+            Ok(())
+        }
+        Err(error) => Err(format!(
+            "Port {port} is not available ({error}). Another program or an earlier server may be using it; choose a different port or stop that program."
+        )),
+    }
+}
+
 fn start_server(server_dir: String) -> Result<ServerStatus, String> {
     let config = read_config(&server_dir)?;
     let mut state = lock_state()?;
@@ -513,6 +534,7 @@ fn start_server(server_dir: String) -> Result<ServerStatus, String> {
         return Err("Another local server is already active.".into());
     }
 
+    ensure_port_available(config.port)?;
     let jar = Path::new(&config.server_jar).file_name().ok_or_else(|| {
         "The configured server JAR has no valid file name.".to_string()
     })?;
@@ -555,6 +577,10 @@ fn start_server(server_dir: String) -> Result<ServerStatus, String> {
 }
 
 fn stop_server() -> Result<ServerStatus, String> {
+    stop_server_within(STOP_TIMEOUT)
+}
+
+fn stop_server_within(timeout: Duration) -> Result<ServerStatus, String> {
     let mut state = lock_state()?;
     refresh_process(&mut state)?;
     if state.child.is_none() {
@@ -580,7 +606,7 @@ fn stop_server() -> Result<ServerStatus, String> {
         "[CloudCraft] Sent the graceful stop command.".into(),
     );
 
-    let deadline = Instant::now() + STOP_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     loop {
         let exited = state
             .child
@@ -605,6 +631,56 @@ fn stop_server() -> Result<ServerStatus, String> {
         state.last_error = None;
     }
     Ok(status_from(&mut state))
+}
+
+/// Gracefully stops the server and starts it again from its saved
+/// configuration. The configuration is validated before anything is touched,
+/// and a server that does not exit in time is never force-killed: the restart
+/// is abandoned so the user can decide.
+fn restart_server(server_dir: String) -> Result<ServerStatus, String> {
+    restart_server_within(server_dir, STOP_TIMEOUT)
+}
+
+fn restart_server_within(
+    server_dir: String,
+    timeout: Duration,
+) -> Result<ServerStatus, String> {
+    let config = read_config(&server_dir)?;
+    let was_active = {
+        let mut state = lock_state()?;
+        ensure_no_file_operation()?;
+        refresh_process(&mut state)?;
+        let active = is_active(state.lifecycle);
+        if active {
+            if state.config.as_ref().map(|item| &item.server_dir)
+                != Some(&config.server_dir)
+            {
+                return Err("Another local server is currently active.".into());
+            }
+            push_log(&mut state, "[CloudCraft] Restart requested.".into());
+        }
+        active
+    };
+
+    let stopped = stop_server_within(timeout)?;
+    if stopped.state == ServerLifecycle::Stopping {
+        return Err(format!(
+            "The server did not shut down within {} seconds, so it was not restarted and was not force-stopped. Wait for it to finish, or use Force stop.",
+            timeout.as_secs().max(1)
+        ));
+    }
+    let status = start_server(server_dir)?;
+    if let Ok(mut state) = lock_state() {
+        push_log(
+            &mut state,
+            if was_active {
+                "[CloudCraft] Server restarted.".into()
+            } else {
+                "[CloudCraft] Server started.".into()
+            },
+        );
+    }
+    Ok(status)
 }
 
 fn force_stop_server() -> Result<ServerStatus, String> {
@@ -681,6 +757,15 @@ pub async fn cloudcraft_server_stop() -> Result<ServerStatus, String> {
     tokio::task::spawn_blocking(stop_server)
         .await
         .map_err(|error| format!("Server stop worker failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn cloudcraft_server_restart(
+    server_dir: String,
+) -> Result<ServerStatus, String> {
+    tokio::task::spawn_blocking(move || restart_server(server_dir))
+        .await
+        .map_err(|error| format!("Server restart worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -850,6 +935,92 @@ pub async fn cloudcraft_server_backup_restore(
         run_operation(OperationKind::Restore, true, "Restore completed.", |t| {
             backup::restore_backup(&server_dir, &backup_id, t)
         })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn cloudcraft_server_software_versions(
+    kind: SoftwareKind,
+) -> Result<Vec<String>, String> {
+    let client = software::build_client()?;
+    software::list_versions(&client, kind).await
+}
+
+#[tauri::command]
+pub async fn cloudcraft_server_software_resolve(
+    kind: SoftwareKind,
+    version: String,
+) -> Result<ResolvedSoftware, String> {
+    let client = software::build_client()?;
+    software::resolve(&client, kind, &version, None)
+        .await
+        .map_err(String::from)
+}
+
+/// Downloads never overwrite an existing file, so they may run while a server
+/// is running; the server only ever sees the finished, verified file.
+#[tauri::command]
+pub async fn cloudcraft_server_software_download(
+    server_dir: String,
+    kind: SoftwareKind,
+    version: String,
+) -> Result<DownloadedSoftware, String> {
+    let handle = tokio::runtime::Handle::current();
+    run_blocking(move || {
+        run_operation(
+            OperationKind::Download,
+            false,
+            "Download verified and installed.",
+            |t| software::download(&handle, &server_dir, kind, &version, t),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn cloudcraft_server_world_export(
+    server_dir: String,
+    destination: String,
+) -> Result<WorldExportResult, String> {
+    run_blocking(move || {
+        run_operation(OperationKind::Export, true, "Export completed.", |t| {
+            let directory = backup::real_directory(
+                Path::new(&server_dir),
+                "server directory",
+            )?;
+            let level = backup::level_name(&directory)?;
+            world::export_world(&server_dir, &destination, &level, t)
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn cloudcraft_server_world_import(
+    server_dir: String,
+    source: String,
+    name: String,
+) -> Result<WorldImportResult, String> {
+    run_blocking(move || {
+        run_operation(OperationKind::Import, true, "Import completed.", |t| {
+            world::import_world(&server_dir, &source, &name, t)
+        })
+    })
+    .await
+}
+
+/// Switches `level-name` to an existing world folder. Returns the previous
+/// level name so the change can be reversed.
+#[tauri::command]
+pub async fn cloudcraft_server_world_activate(
+    server_dir: String,
+    folder: String,
+) -> Result<String, String> {
+    run_blocking(move || {
+        ensure_no_file_operation()?;
+        ensure_server_inactive()?;
+        world::set_active_world(&server_dir, &folder)
     })
     .await
 }
@@ -1085,5 +1256,362 @@ mod tests {
         }
         assert_eq!(state.logs.len(), MAX_LOG_LINES);
         assert_eq!(state.logs.front().unwrap(), "line 20");
+    }
+
+    /// Real child processes: a stand-in `java` that behaves like a server
+    /// (exits when it reads `stop`, or ignores it entirely).
+    #[cfg(unix)]
+    mod lifecycle {
+        use super::*;
+        use std::os::unix::fs::PermissionsExt;
+
+        static SERIAL: Mutex<()> = Mutex::new(());
+
+        const POLITE: &str = "#!/bin/sh\necho fake server up\nwhile IFS= read -r line; do\n  if [ \"$line\" = \"stop\" ]; then echo fake server stopping; exit 0; fi\ndone\n";
+        const STUBBORN: &str = "#!/bin/sh\nwhile true; do sleep 0.2; done\n";
+
+        struct Fixture {
+            root: PathBuf,
+            server_dir: String,
+        }
+
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                let _ = force_stop_server();
+                if let Ok(mut state) = lock_state() {
+                    state.config = None;
+                }
+                let _ = fs::remove_dir_all(&self.root);
+            }
+        }
+
+        fn fixture(script: &str) -> Fixture {
+            let root = test_root();
+            let mut config = config(&root);
+            let bin = root.join("bin");
+            fs::create_dir_all(&bin).unwrap();
+            let java = bin.join("java");
+            fs::write(&java, script).unwrap();
+            fs::set_permissions(&java, fs::Permissions::from_mode(0o755))
+                .unwrap();
+            config.java_executable = java.to_string_lossy().into_owned();
+            config.port = 25999;
+            let validated = validate_config(config).unwrap();
+            write_configuration_files(&validated).unwrap();
+            Fixture {
+                root,
+                server_dir: validated.server_dir,
+            }
+        }
+
+        fn guard() -> std::sync::MutexGuard<'static, ()> {
+            let guard = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+            let _ = force_stop_server();
+            guard
+        }
+
+        fn logs() -> Vec<String> {
+            server_logs().unwrap()
+        }
+
+        /// Never leaves a real server process behind, even when an assertion fails.
+        struct Cleanup;
+
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = force_stop_server();
+                if let Ok(mut state) = lock_state() {
+                    state.config = None;
+                }
+            }
+        }
+
+        fn varint(mut value: u32) -> Vec<u8> {
+            let mut bytes = Vec::new();
+            loop {
+                let byte = (value & 0x7f) as u8;
+                value >>= 7;
+                if value == 0 {
+                    bytes.push(byte);
+                    return bytes;
+                }
+                bytes.push(byte | 0x80);
+            }
+        }
+
+        /// Minecraft server-list ping; returns the JSON status reply.
+        fn minecraft_status_once(port: u16) -> Result<String, String> {
+            let address = SocketAddr::from(([127, 0, 0, 1], port));
+            let mut stream =
+                TcpStream::connect_timeout(&address, Duration::from_secs(5))
+                    .map_err(|error| error.to_string())?;
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .map_err(|error| error.to_string())?;
+            let mut handshake = vec![0x00];
+            handshake.extend(varint(767));
+            handshake.extend(varint(9));
+            handshake.extend(b"127.0.0.1");
+            handshake.extend(port.to_be_bytes());
+            handshake.push(1);
+            let mut packet = varint(handshake.len() as u32);
+            packet.extend(handshake);
+            packet.extend([1, 0]);
+            stream
+                .write_all(&packet)
+                .map_err(|error| error.to_string())?;
+            let mut reply = Vec::new();
+            let mut buffer = [0u8; 4096];
+            while !String::from_utf8_lossy(&reply).contains("\"version\"") {
+                let read = std::io::Read::read(&mut stream, &mut buffer)
+                    .map_err(|error| error.to_string())?;
+                if read == 0 {
+                    break;
+                }
+                reply.extend_from_slice(&buffer[..read]);
+            }
+            Ok(String::from_utf8_lossy(&reply).into_owned())
+        }
+
+        fn minecraft_status(port: u16) -> Result<String, String> {
+            let deadline = Instant::now() + Duration::from_secs(90);
+            loop {
+                match minecraft_status_once(port) {
+                    Ok(reply) => return Ok(reply),
+                    Err(error) if Instant::now() >= deadline => {
+                        return Err(error)
+                    }
+                    Err(_) => std::thread::sleep(Duration::from_secs(2)),
+                }
+            }
+        }
+
+        fn wait_until_running(what: &str) -> ServerStatus {
+            let deadline = Instant::now() + Duration::from_secs(240);
+            loop {
+                let status = server_status().unwrap();
+                if status.state == ServerLifecycle::Running {
+                    return status;
+                }
+                assert!(
+                    matches!(status.state, ServerLifecycle::Starting),
+                    "{what}: server left Starting: {:?}\n{}",
+                    status.state,
+                    logs().join("\n")
+                );
+                assert!(
+                    Instant::now() < deadline,
+                    "{what}: server never became reachable\n{}",
+                    logs().join("\n")
+                );
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        }
+
+        /// Runs a genuine Paper server. Accepting the Minecraft EULA is part of
+        /// the configuration, so this is opt-in:
+        /// `CLOUDCRAFT_REAL_JAVA=/path/to/java cargo test real_server -- --ignored`
+        #[test]
+        #[ignore = "downloads and runs a real Minecraft server"]
+        fn real_server_end_to_end() {
+            let _guard = guard();
+            let _cleanup = Cleanup;
+            let java = std::env::var("CLOUDCRAFT_REAL_JAVA")
+                .expect("set CLOUDCRAFT_REAL_JAVA to a java executable");
+            let root = test_root();
+            let server_dir = root.join("server");
+            fs::create_dir_all(&server_dir).unwrap();
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            let registry = ops::Registry::new();
+            let tracker = registry.begin(OperationKind::Download).unwrap();
+            let downloaded = software::download(
+                runtime.handle(),
+                server_dir.to_str().unwrap(),
+                SoftwareKind::Paper,
+                "1.21.8",
+                &tracker,
+            )
+            .unwrap();
+            println!("downloaded {downloaded:?}");
+
+            let config = ServerConfig {
+                server_dir: server_dir.to_string_lossy().into_owned(),
+                server_jar: downloaded.path.clone(),
+                java_executable: java,
+                name: "CloudCraft e2e".into(),
+                game_version: "1.21.8".into(),
+                memory_mb: 1536,
+                max_players: 2,
+                port: 25977,
+                accept_eula: true,
+            };
+            configure_server(config).unwrap();
+            let dir = server_dir.to_string_lossy().into_owned();
+
+            let first = start_server(dir.clone()).unwrap();
+            let first_pid = first.pid.unwrap();
+            let running = wait_until_running("first start");
+            println!("first start reachable: {:?}", running.connection_address);
+            let status = minecraft_status(25977).unwrap();
+            assert!(status.contains("1.21.8"), "{status}");
+
+            let restarted =
+                restart_server_within(dir.clone(), Duration::from_secs(60))
+                    .unwrap();
+            assert_ne!(restarted.pid.unwrap(), first_pid);
+            wait_until_running("after restart");
+            let status = minecraft_status(25977).unwrap();
+            assert!(status.contains("1.21.8"), "{status}");
+            println!("restart ok, new pid {:?}", restarted.pid);
+
+            let stopped = stop_server_within(Duration::from_secs(60)).unwrap();
+            assert_eq!(stopped.state, ServerLifecycle::Stopped);
+            assert!(server_dir.join("world/level.dat").is_file());
+
+            let zip = root.join("world-export.zip");
+            let level = backup::level_name(&server_dir).unwrap();
+            let registry = ops::Registry::new();
+            let exported = world::export_world(
+                &dir,
+                zip.to_str().unwrap(),
+                &level,
+                &registry.begin(OperationKind::Export).unwrap(),
+            )
+            .unwrap();
+            println!("exported {exported:?}");
+            let registry = ops::Registry::new();
+            let imported = world::import_world(
+                &dir,
+                zip.to_str().unwrap(),
+                "Imported",
+                &registry.begin(OperationKind::Import).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(imported.files, exported.files);
+            assert_eq!(
+                world::set_active_world(&dir, "Imported").unwrap(),
+                "world"
+            );
+
+            start_server(dir.clone()).unwrap();
+            wait_until_running("imported world");
+            assert!(minecraft_status(25977).unwrap().contains("1.21.8"));
+            assert!(
+                logs().iter().any(|line| line.contains("Done (")),
+                "{}",
+                logs().join("\n")
+            );
+            let stopped = stop_server_within(Duration::from_secs(60)).unwrap();
+            assert_eq!(stopped.state, ServerLifecycle::Stopped);
+            assert!(server_dir.join("Imported/level.dat").is_file());
+            println!("imported world loaded and server stopped cleanly");
+        }
+
+        #[test]
+        fn restart_replaces_the_process_after_a_graceful_stop() {
+            let _guard = guard();
+            let fixture = fixture(POLITE);
+            let first = start_server(fixture.server_dir.clone()).unwrap();
+            let first_pid = first.pid.expect("server should be running");
+            std::thread::sleep(Duration::from_millis(300));
+
+            let second = restart_server_within(
+                fixture.server_dir.clone(),
+                Duration::from_secs(10),
+            )
+            .unwrap();
+            let second_pid = second.pid.expect("restarted server has a pid");
+            assert_ne!(first_pid, second_pid);
+            assert!(second.can_stop);
+            let lines = logs();
+            assert!(lines.iter().any(|l| l.contains("Server restarted")));
+
+            std::thread::sleep(Duration::from_millis(300));
+            let stopped = stop_server_within(Duration::from_secs(10)).unwrap();
+            assert_eq!(stopped.state, ServerLifecycle::Stopped);
+            assert!(stopped.pid.is_none());
+        }
+
+        #[test]
+        fn restart_never_force_kills_a_server_that_will_not_stop() {
+            let _guard = guard();
+            let fixture = fixture(STUBBORN);
+            let started = start_server(fixture.server_dir.clone()).unwrap();
+            let pid = started.pid.unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+
+            let error = restart_server_within(
+                fixture.server_dir.clone(),
+                Duration::from_millis(500),
+            )
+            .unwrap_err();
+            assert!(error.contains("did not shut down"), "{error}");
+            let status = server_status().unwrap();
+            assert_eq!(status.state, ServerLifecycle::Stopping);
+            assert_eq!(status.pid, Some(pid));
+            assert!(status.can_force_stop);
+
+            let forced = force_stop_server().unwrap();
+            assert_eq!(forced.state, ServerLifecycle::Stopped);
+        }
+
+        #[test]
+        fn start_refuses_a_port_another_program_holds() {
+            let _guard = guard();
+            let fixture = fixture(POLITE);
+            let occupied = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = occupied.local_addr().unwrap().port();
+            let mut config = read_config(&fixture.server_dir).unwrap();
+            config.port = port;
+            configure_server(config).unwrap();
+
+            let error = start_server(fixture.server_dir.clone()).unwrap_err();
+            assert!(error.contains("not available"), "{error}");
+            let status = server_status().unwrap();
+            assert_eq!(status.state, ServerLifecycle::Stopped);
+            assert!(status.pid.is_none());
+            let error = restart_server_within(
+                fixture.server_dir.clone(),
+                Duration::from_secs(5),
+            )
+            .unwrap_err();
+            assert!(error.contains("not available"), "{error}");
+        }
+
+        #[test]
+        fn restart_of_a_stopped_server_simply_starts_it() {
+            let _guard = guard();
+            let fixture = fixture(POLITE);
+            load_server(fixture.server_dir.clone()).unwrap();
+            assert_eq!(
+                server_status().unwrap().state,
+                ServerLifecycle::Stopped
+            );
+            let status = restart_server_within(
+                fixture.server_dir.clone(),
+                Duration::from_secs(10),
+            )
+            .unwrap();
+            assert!(status.pid.is_some());
+            std::thread::sleep(Duration::from_millis(300));
+            stop_server_within(Duration::from_secs(10)).unwrap();
+        }
+
+        #[test]
+        fn restart_validates_configuration_before_touching_the_process() {
+            let _guard = guard();
+            let fixture = fixture(POLITE);
+            let started = start_server(fixture.server_dir.clone()).unwrap();
+            let pid = started.pid.unwrap();
+            fs::remove_file(Path::new(&fixture.server_dir).join(CONFIG_FILE))
+                .unwrap();
+
+            assert!(restart_server_within(
+                fixture.server_dir.clone(),
+                Duration::from_secs(5)
+            )
+            .is_err());
+            assert_eq!(server_status().unwrap().pid, Some(pid));
+        }
     }
 }

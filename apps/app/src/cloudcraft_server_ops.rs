@@ -18,6 +18,9 @@ pub enum OperationKind {
     Verify,
     Restore,
     Delete,
+    Download,
+    Import,
+    Export,
 }
 
 impl OperationKind {
@@ -27,6 +30,9 @@ impl OperationKind {
             Self::Verify => "verification",
             Self::Restore => "restore",
             Self::Delete => "deletion",
+            Self::Download => "server software download",
+            Self::Import => "world import",
+            Self::Export => "world export",
         }
     }
 }
