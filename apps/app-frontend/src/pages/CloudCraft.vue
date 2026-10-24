@@ -1,12 +1,35 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { RouterLink, useRouter } from 'vue-router'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
-import { install as installProfile, list, run } from '@/helpers/profile'
+import {
+  get_optimal_jre_key,
+  install as installProfile,
+  kill as killProfile,
+  list,
+  remove as removeProfile,
+  run,
+} from '@/helpers/profile'
+import { get_by_profile_path } from '@/helpers/process'
+import { auto_install_java, get_max_memory, test_jre } from '@/helpers/jre'
+import {
+  deleteInstance as deleteWithGuard,
+  installRequiredJava,
+} from '@/helpers/cloudcraftInstances'
+import LauncherAccountPanel from '@/components/cloudcraft/LauncherAccountPanel.vue'
+import CreateInstanceForm from '@/components/cloudcraft/CreateInstanceForm.vue'
+import { get_default_user } from '@/helpers/auth'
+import { process_listener } from '@/helpers/events'
+import {
+  applyProcessEvent,
+  launchInstance as launchWithPreflight,
+  reconcileRunning,
+  stopInstance as stopWithConfirmation,
+} from '@/helpers/cloudcraftLauncher'
 import { get as getSettings, set as setSettings } from '@/helpers/settings'
-import { cloudSessionProvider } from '@/helpers/cloudSession'
+import { cloudSessionProvider, cloudSessionStateLabel } from '@/helpers/cloudSession'
 import { cloudStorageProvider } from '@/helpers/cloudStorage'
 import LocalServerPanel from '@/components/cloudcraft/LocalServerPanel.vue'
 import {
@@ -69,6 +92,8 @@ const cloudSessionStatus = ref({
   message: 'Checking cloud gaming provider status…',
   canStart: false,
   canStop: false,
+  canCancel: false,
+  cleanupRequired: false,
 })
 const backupBusy = ref(false)
 const backupError = ref('')
@@ -123,16 +148,111 @@ async function loadInstances() {
   }
 }
 
+const runningPaths = ref({})
+const stoppingPath = ref('')
+let unlistenProcess = null
+
+const launcherDeps = {
+  getDefaultUser: get_default_user,
+  getOptimalJre: get_optimal_jre_key,
+  testJre: test_jre,
+  getSettings,
+  getMaxMemoryKib: get_max_memory,
+  run,
+  kill: killProfile,
+  processesFor: get_by_profile_path,
+}
+
+async function refreshRunning() {
+  runningPaths.value = await reconcileRunning(
+    instances.value.map((instance) => instance.path),
+    get_by_profile_path,
+  )
+}
+
 async function launchInstance(instance) {
-  if (!instance?.path || launchingPath.value) return
+  if (!instance?.path || launchingPath.value || runningPaths.value[instance.path]) return
   launchingPath.value = instance.path
   launchError.value = ''
+  javaFixPath.value = ''
   try {
-    await run(instance.path)
-  } catch (error) {
-    launchError.value = String(error?.message || error)
+    const outcome = await launchWithPreflight(instance, launcherDeps)
+    if (outcome.kind === 'blocked') {
+      launchError.value = outcome.issues.map((issue) => issue.message).join(' ')
+      if (outcome.issues.some((issue) => issue.code === 'no_java'))
+        javaFixPath.value = instance.path
+    } else if (outcome.kind === 'failed') {
+      launchError.value = `Launch failed: ${outcome.message}`
+      await loadInstances()
+    } else {
+      runningPaths.value = { ...runningPaths.value, [instance.path]: true }
+    }
   } finally {
     launchingPath.value = ''
+    refreshRunning()
+  }
+}
+
+async function stopGame(instance) {
+  if (!instance?.path || stoppingPath.value) return
+  stoppingPath.value = instance.path
+  launchError.value = ''
+  try {
+    const result = await stopWithConfirmation(instance.path, launcherDeps)
+    if (!result.stopped) launchError.value = `Could not stop the game: ${result.message}`
+  } finally {
+    stoppingPath.value = ''
+    await refreshRunning()
+  }
+}
+
+const javaFixPath = ref('')
+const javaBusy = ref(false)
+const confirmDeletePath = ref('')
+const deletingPath = ref('')
+
+async function fixJava(instance) {
+  if (javaBusy.value) return
+  javaBusy.value = true
+  launchError.value = ''
+  installMessage.value = ''
+  try {
+    const result = await installRequiredJava(instance.path, {
+      getOptimalJre: get_optimal_jre_key,
+      autoInstallJava: auto_install_java,
+    })
+    if (result.installed) {
+      installMessage.value = `${result.message} You can launch ${instance.name || 'the instance'} now.`
+      javaFixPath.value = ''
+    } else {
+      launchError.value = result.message
+    }
+  } finally {
+    javaBusy.value = false
+  }
+}
+
+async function removeInstance(instance) {
+  if (deletingPath.value) return
+  if (confirmDeletePath.value !== instance.path) {
+    confirmDeletePath.value = instance.path
+    return
+  }
+  deletingPath.value = instance.path
+  installError.value = ''
+  installMessage.value = ''
+  try {
+    const result = await deleteWithGuard(instance, {
+      remove: removeProfile,
+      processesFor: get_by_profile_path,
+    })
+    if (result.deleted) installMessage.value = result.message
+    else installError.value = result.message
+    await loadInstances()
+    if (cloudInstancePath.value === instance.path) cloudInstancePath.value = ''
+  } finally {
+    deletingPath.value = ''
+    confirmDeletePath.value = ''
   }
 }
 
@@ -165,6 +285,8 @@ async function loadCloudSessionStatus() {
       message: String(error?.message || error),
       canStart: false,
       canStop: false,
+      canCancel: false,
+      cleanupRequired: false,
     }
   }
 }
@@ -196,26 +318,25 @@ async function startCloudSession() {
 
   cloudSessionBusy.value = true
   cloudSessionError.value = ''
+  const poll = setInterval(loadCloudSessionStatus, 1000)
   try {
-    cloudSessionStatus.value = await cloudSessionProvider.startSession({
-      instancePath: instance.path,
-      gameVersion: instance.game_version,
-    })
+    cloudSessionStatus.value = await cloudSessionProvider.startSession(instance.game_version)
   } catch (error) {
     cloudSessionError.value = String(error?.message || error)
+    await loadCloudSessionStatus()
   } finally {
+    clearInterval(poll)
     cloudSessionBusy.value = false
   }
 }
 
 async function stopCloudSession() {
-  const sessionId = cloudSessionStatus.value.sessionId
-  if (!sessionId || !cloudSessionStatus.value.canStop || cloudSessionBusy.value) return
+  if (!cloudSessionStatus.value.canStop || cloudSessionBusy.value) return
 
   cloudSessionBusy.value = true
   cloudSessionError.value = ''
   try {
-    cloudSessionStatus.value = await cloudSessionProvider.stopSession(sessionId)
+    cloudSessionStatus.value = await cloudSessionProvider.stopSession()
   } catch (error) {
     cloudSessionError.value = String(error?.message || error)
   } finally {
@@ -224,17 +345,13 @@ async function stopCloudSession() {
 }
 
 async function cancelCloudSessionStart() {
-  if (cloudSessionStatus.value.state !== 'starting' || cloudSessionBusy.value) return
+  if (!cloudSessionStatus.value.canCancel) return
 
-  cloudSessionBusy.value = true
   cloudSessionError.value = ''
   try {
-    await cloudSessionProvider.cancelStart()
-    await loadCloudSessionStatus()
+    cloudSessionStatus.value = await cloudSessionProvider.cancelStart()
   } catch (error) {
     cloudSessionError.value = String(error?.message || error)
-  } finally {
-    cloudSessionBusy.value = false
   }
 }
 
@@ -293,8 +410,15 @@ function openInstance(instance) {
   if (instance?.path) router.push(`/instance/${encodeURIComponent(instance.path)}`)
 }
 
-onMounted(() => {
-  loadInstances()
+onBeforeUnmount(() => {
+  if (unlistenProcess) unlistenProcess()
+})
+
+onMounted(async () => {
+  unlistenProcess = await process_listener((event) => {
+    runningPaths.value = applyProcessEvent(runningPaths.value, event)
+  })
+  loadInstances().then(refreshRunning)
   loadLauncherSettings()
   loadCloudSessionStatus()
   loadCloudStorageStatus()
@@ -548,17 +672,16 @@ function addSaveNote() {
             <h3 class="m-0 text-lg font-semibold">Cloud gaming</h3>
           </div>
           <span class="status-pill muted">
-            {{
-              cloudSessionStatus.state === 'unavailable'
-                ? 'Not configured'
-                : cloudSessionStatus.state
-            }}
+            {{ cloudSessionStateLabel(cloudSessionStatus.state) }}
           </span>
         </div>
-        <p class="mt-3 text-secondary">{{ cloudSessionStatus.message }}</p>
+        <p class="mt-3 text-secondary" role="status">{{ cloudSessionStatus.message }}</p>
+        <p v-if="cloudSessionStatus.cleanupRequired" class="inline-error" role="alert">
+          Remote resources may still exist for this session. Stop it to release them.
+        </p>
         <p class="m-0 text-sm text-secondary">
-          The provider boundary defines unavailable, starting, ready, stopping, stopped, and error
-          states. No remote machine is started and no provider credentials are configured.
+          Session state is tracked by the CloudCraft backend. Streaming a remote game requires a
+          real provider, and none is integrated yet.
         </p>
         <div class="cloud-controls">
           <label for="cloud-instance">Instance for a future remote session</label>
@@ -584,19 +707,23 @@ function addSaveNote() {
               {{ cloudSessionBusy ? 'Working…' : 'Start cloud session' }}
             </button>
             <button
-              v-if="cloudSessionStatus.canStop && cloudSessionStatus.sessionId"
+              v-if="cloudSessionStatus.canStop"
               class="secondary-action"
               type="button"
               :disabled="cloudSessionBusy"
               @click="stopCloudSession"
             >
-              Stop cloud session
+              {{
+                cloudSessionStatus.cleanupRequired
+                  ? 'Release remote resources'
+                  : 'Stop cloud session'
+              }}
             </button>
             <button
               v-if="cloudSessionStatus.state === 'starting'"
               class="secondary-action"
               type="button"
-              :disabled="cloudSessionBusy"
+              :disabled="!cloudSessionStatus.canCancel"
               @click="cancelCloudSessionStart"
             >
               Cancel startup
@@ -764,10 +891,27 @@ function addSaveNote() {
           </div>
         </div>
         <p class="mt-3 text-secondary">
-          These profiles come from the existing launcher backend. Launching uses the normal launcher
-          process and account flow.
+          Create, install, repair, launch and delete real Minecraft instances. Launching needs a
+          signed-in Microsoft account that owns Minecraft and a compatible Java runtime.
         </p>
+        <div class="launcher-grid">
+          <LauncherAccountPanel @change="loadInstances" />
+          <CreateInstanceForm :instances="instances" @created="loadInstances" />
+        </div>
         <p v-if="instanceError" class="inline-error" role="alert">{{ instanceError }}</p>
+        <div v-if="javaFixPath" class="java-fix" role="status">
+          <span>No compatible Java runtime was found for this instance.</span>
+          <button
+            class="secondary-action"
+            type="button"
+            :disabled="javaBusy"
+            @click="
+              fixJava(instances.find((item) => item.path === javaFixPath) || { path: javaFixPath })
+            "
+          >
+            {{ javaBusy ? 'Installing Java…' : 'Install required Java' }}
+          </button>
+        </div>
         <p v-if="installError" class="inline-error" role="alert" aria-live="assertive">
           {{ installError }}
         </p>
@@ -789,15 +933,26 @@ function addSaveNote() {
               </p>
               <p class="m-0 mt-1 text-xs text-secondary">
                 {{
-                  instance.install_stage === 'installed'
-                    ? 'Ready to play'
-                    : 'Needs installation or repair'
+                  runningPaths[instance.path]
+                    ? 'Running'
+                    : instance.install_stage === 'installed'
+                      ? 'Ready to play'
+                      : 'Needs installation or repair'
                 }}
               </p>
             </div>
             <div class="flex flex-wrap gap-2">
               <button
-                v-if="instance.install_stage === 'installed'"
+                v-if="runningPaths[instance.path]"
+                class="primary-action"
+                type="button"
+                :disabled="stoppingPath === instance.path"
+                @click="stopGame(instance)"
+              >
+                {{ stoppingPath === instance.path ? 'Stopping…' : 'Stop' }}
+              </button>
+              <button
+                v-else-if="instance.install_stage === 'installed'"
                 class="primary-action"
                 type="button"
                 :disabled="!!launchingPath || !!installingPath"
@@ -826,14 +981,29 @@ function addSaveNote() {
               <button class="secondary-action" type="button" @click="openInstance(instance)">
                 Details
               </button>
+              <button
+                class="secondary-action danger-action"
+                type="button"
+                :disabled="!!deletingPath || !!installingPath || runningPaths[instance.path]"
+                @click="removeInstance(instance)"
+                @blur="confirmDeletePath = ''"
+              >
+                {{
+                  deletingPath === instance.path
+                    ? 'Deleting…'
+                    : confirmDeletePath === instance.path
+                      ? 'Confirm delete'
+                      : 'Delete'
+                }}
+              </button>
             </div>
           </article>
         </div>
         <div v-else class="empty-state">
           <span class="feature-icon"><LibraryIcon /></span><strong>No instances found</strong
           ><span class="text-sm text-secondary"
-            >Create one with the launcher's existing instance wizard.</span
-          ><RouterLink class="primary-action" to="/library">Open library</RouterLink>
+            >Use the form above to create and install your first instance.</span
+          >
         </div>
       </section>
     </template>
@@ -1194,6 +1364,27 @@ function addSaveNote() {
 </template>
 
 <style scoped>
+.launcher-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.java-fix {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #fbbf24;
+  border-radius: 0.75rem;
+}
+.danger-action:hover:not(:disabled) {
+  border-color: #f87171;
+  color: #f87171;
+}
 .cloudcraft-page {
   min-height: 100%;
   color: var(--color-base);

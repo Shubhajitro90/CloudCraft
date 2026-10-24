@@ -220,7 +220,7 @@ pub fn scan_tree(root: &Path, tracker: &Tracker) -> Result<TreeScan, OpError> {
 
 /// Recursively copies `source` into the new `destination`, rejecting symlinks
 /// and special files, and records every file in `files`.
-fn copy_tree(
+pub fn copy_tree(
     source: &Path,
     destination: &Path,
     relative: &Path,
@@ -288,7 +288,7 @@ fn summary(manifest: &BackupManifest) -> BackupSummary {
 /// Removes an incomplete staging folder. If it cannot be removed the outcome
 /// becomes a failure that names the leftover folder, so cleanup problems are
 /// never hidden behind a "cancelled" or generic error.
-fn discard_staging<T>(
+pub fn discard_staging<T>(
     staging: &Path,
     result: Result<T, OpError>,
 ) -> Result<T, OpError> {
@@ -315,7 +315,7 @@ fn discard_staging<T>(
 
 /// Removes leftover staging folders from a crashed run. Only plain folders
 /// whose names carry CloudCraft's staging prefix are touched.
-fn remove_stale_staging(parent: &Path, prefix: &str) {
+pub fn remove_stale_staging(parent: &Path, prefix: &str) {
     let Ok(entries) = fs::read_dir(parent) else {
         return;
     };

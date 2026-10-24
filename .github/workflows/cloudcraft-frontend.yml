@@ -15,7 +15,7 @@ on:
       - packages/ui/**
       - packages/utils/**
   push:
-    branches: [cloudcraft-implementation]
+    branches: [cloudcraft-implementation, v0/status-recheck]
     paths:
       - .github/workflows/cloudcraft-frontend.yml
       - apps/app-frontend/**
@@ -73,6 +73,12 @@ jobs:
             apps/app-frontend/src/components/cloudcraft/ServerDeleteConfirm.vue \
             apps/app-frontend/src/components/cloudcraft/ServerDeletePanel.vue \
             apps/app-frontend/src/components/cloudcraft/ServerOperationProgress.vue \
+            apps/app-frontend/src/components/cloudcraft/LauncherAccountPanel.vue \
+            apps/app-frontend/src/components/cloudcraft/CreateInstanceForm.vue \
+            apps/app-frontend/src/helpers/cloudcraftInstances.ts \
+            apps/app-frontend/src/helpers/cloudcraftInstances.test.mjs \
+            apps/app-frontend/src/helpers/cloudcraftLauncher.ts \
+            apps/app-frontend/src/helpers/cloudcraftLauncher.test.mjs \
             apps/app-frontend/src/helpers/cloudcraftOperations.ts \
             apps/app-frontend/src/helpers/cloudcraftOperations.test.mjs \
             apps/app-frontend/src/helpers/useServerOperation.ts \
@@ -97,6 +103,10 @@ jobs:
             src/components/cloudcraft/ServerDeleteConfirm.vue \
             src/components/cloudcraft/ServerDeletePanel.vue \
             src/components/cloudcraft/ServerOperationProgress.vue \
+            src/components/cloudcraft/LauncherAccountPanel.vue \
+            src/components/cloudcraft/CreateInstanceForm.vue \
+            src/helpers/cloudcraftInstances.ts \
+            src/helpers/cloudcraftLauncher.ts \
             src/helpers/cloudcraftOperations.ts \
             src/helpers/useServerOperation.ts \
             src/helpers/cloudcraftServer.ts \
@@ -120,7 +130,11 @@ jobs:
           node-version: 22
 
       - name: Frontend operation logic tests
-        run: node --experimental-strip-types --test apps/app-frontend/src/helpers/cloudcraftOperations.test.mjs
+        run: |
+          node --experimental-strip-types --test \
+            apps/app-frontend/src/helpers/cloudcraftOperations.test.mjs \
+            apps/app-frontend/src/helpers/cloudcraftLauncher.test.mjs \
+            apps/app-frontend/src/helpers/cloudcraftInstances.test.mjs
 
   rust:
     name: Rust formatting and local-backup safety tests

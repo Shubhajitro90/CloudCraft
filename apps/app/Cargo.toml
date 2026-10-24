@@ -32,6 +32,9 @@ futures = "0.3"
 daedalus = { path = "../../packages/daedalus" }
 chrono = "0.4.26"
 sha2 = "0.10"
+sha1_smol = { version = "1.0.0", features = ["std"] }
+zip = "0.6.5"
+reqwest = { version = "0.12.3", features = ["json", "stream", "deflate", "gzip", "brotli", "rustls-tls", "charset", "http2", "macos-system-configuration"], default-features = false }
 
 dirs = "5.0.1"
 
