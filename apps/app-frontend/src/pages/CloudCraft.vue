@@ -5,6 +5,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { RouterLink, useRouter } from 'vue-router'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 import {
+  duplicate as duplicateProfile,
   get_optimal_jre_key,
   install as installProfile,
   kill as killProfile,
@@ -229,6 +230,24 @@ async function fixJava(instance) {
     }
   } finally {
     javaBusy.value = false
+  }
+}
+
+const duplicatingPath = ref('')
+
+async function duplicateInstance(instance) {
+  if (duplicatingPath.value || installingPath.value || runningPaths.value[instance.path]) return
+  duplicatingPath.value = instance.path
+  installError.value = ''
+  installMessage.value = ''
+  try {
+    await duplicateProfile(instance.path)
+    await loadInstances()
+    installMessage.value = `${instance.name || 'Instance'} was duplicated. The copy appears in the list.`
+  } catch (error) {
+    installError.value = `Could not duplicate the instance: ${String(error?.message || error)}`
+  } finally {
+    duplicatingPath.value = ''
   }
 }
 
@@ -977,6 +996,15 @@ function addSaveNote() {
                 @click="installInstance(instance, true)"
               >
                 {{ installingPath === instance.path ? 'Repairing…' : 'Repair' }}
+              </button>
+              <button
+                v-if="instance.install_stage === 'installed'"
+                class="secondary-action"
+                type="button"
+                :disabled="!!duplicatingPath || !!installingPath || runningPaths[instance.path]"
+                @click="duplicateInstance(instance)"
+              >
+                {{ duplicatingPath === instance.path ? 'Duplicating…' : 'Duplicate' }}
               </button>
               <button class="secondary-action" type="button" @click="openInstance(instance)">
                 Details
