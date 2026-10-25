@@ -2,6 +2,9 @@
     all(not(debug_assertions), target_os = "windows"),
     windows_subsystem = "windows"
 )]
+// Auto-trait (`Send`) evaluation of the deeply nested async Tauri commands exceeds
+// rustc's default depth of 128 (E0275 in api/import.rs).
+#![recursion_limit = "256"]
 
 use native_dialog::{MessageDialog, MessageType};
 use tauri::{Listener, Manager};

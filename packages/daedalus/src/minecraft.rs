@@ -385,7 +385,9 @@ pub enum Argument {
     Normal(String),
     /// An argument which is only applied if certain conditions are met
     Ruled {
-        /// The rules deciding whether the argument(s) is used or not
+        /// The rules deciding whether the argument(s) is used or not. Newer
+        /// manifests omit the key for unconditional entries; empty means "always".
+        #[serde(default)]
         rules: Vec<Rule>,
         /// The container of the argument(s) that should be applied accordingly
         value: ArgumentValue,
@@ -400,6 +402,14 @@ pub enum ArgumentType {
     Game,
     /// The argument is passed to the JVM
     Jvm,
+    /// Mojang's default JVM tuning (heap size, GC). The launcher derives heap size
+    /// from the user's memory setting instead, so these are parsed but not applied.
+    #[serde(rename = "default-user-jvm")]
+    DefaultUserJvm,
+    /// Any argument category added to the manifest format after this enum was
+    /// written. Without it a single new key makes every current version uninstallable.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -458,4 +468,27 @@ pub struct Asset {
 pub struct AssetsIndex {
     /// A hashmap containing the filename (key) and asset (value)
     pub objects: HashMap<String, Asset>,
+}
+
+#[cfg(test)]
+mod argument_type_tests {
+    use super::*;
+
+    // Mirrors the `arguments` object of the Minecraft 26.3 manifest, plus a key
+    // that does not exist yet, to keep future manifest additions installable.
+    #[test]
+    fn parses_current_and_future_argument_categories() {
+        let json = r#"{
+            "default-user-jvm": [{"value": ["-Xms2G", "-Xmx4G"]}],
+            "game": ["--username", "${auth_player_name}"],
+            "jvm": [{"rules": [{"action": "allow", "os": {"name": "windows", "versionRange": {"min": "10.0.17134"}}}], "value": "-XX:+UseZGC"}],
+            "some-future-category": ["--future"]
+        }"#;
+        let arguments: HashMap<ArgumentType, Vec<Argument>> =
+            serde_json::from_str(json).expect("manifest arguments must parse");
+        assert_eq!(arguments[&ArgumentType::Game].len(), 2);
+        assert_eq!(arguments[&ArgumentType::Jvm].len(), 1);
+        assert_eq!(arguments[&ArgumentType::DefaultUserJvm].len(), 1);
+        assert!(arguments.contains_key(&ArgumentType::Unknown));
+    }
 }

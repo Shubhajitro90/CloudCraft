@@ -4,6 +4,7 @@ on:
     branches:
       - feature*
       - cloudcraft-implementation
+      - 'v0/**'
     tags:
       - 'build*'
       - 'v*'
@@ -17,6 +18,13 @@ on:
       - 'packages/ui/**'
       - 'packages/utils/**'
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudcraft-desktop-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   build:

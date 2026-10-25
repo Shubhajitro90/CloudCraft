@@ -2,7 +2,7 @@ name: CloudCraft validation
 
 on:
   pull_request:
-    branches: [beta]
+    branches: [beta, v0/status-recheck]
     paths:
       - .github/workflows/cloudcraft-frontend.yml
       - apps/app-frontend/**
@@ -15,7 +15,7 @@ on:
       - packages/ui/**
       - packages/utils/**
   push:
-    branches: [cloudcraft-implementation, v0/status-recheck]
+    branches: [cloudcraft-implementation, 'v0/**']
     paths:
       - .github/workflows/cloudcraft-frontend.yml
       - apps/app-frontend/**
@@ -166,3 +166,35 @@ jobs:
 
       - name: Run desktop crate tests
         run: cargo test --package theseus_gui --no-default-features
+
+  server-e2e:
+    name: Real server end-to-end (network, Java 21)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev pkg-config
+
+      - name: Set up Java 21
+        id: java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # Downloads Paper from the official PaperMC API, verifies its SHA-256, starts the
+      # real server, pings it, restarts, stops, and checks world persistence and
+      # export/import. These tests are #[ignore]d in the unit job because they need
+      # network access and a Java runtime.
+      - name: Run ignored real-network tests
+        env:
+          CLOUDCRAFT_REAL_JAVA: ${{ steps.java.outputs.path }}/bin/java
+        run: cargo test --package theseus_gui --no-default-features -- --ignored --nocapture

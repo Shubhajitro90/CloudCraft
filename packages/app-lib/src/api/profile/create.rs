@@ -150,8 +150,15 @@ pub async fn profile_create_from_duplicate(
         ErrorKind::UnmanagedProfileError(copy_from.to_string())
     })?;
 
+    let existing_names = profile::list()
+        .await?
+        .into_iter()
+        .map(|existing| existing.name)
+        .collect::<Vec<_>>();
+    let copy_name = unique_copy_name(&profile.name, &existing_names);
+
     let profile_path_id = profile_create(
-        profile.name.clone(),
+        copy_name,
         profile.game_version.clone(),
         profile.loader,
         profile.loader_version.clone(),
@@ -204,4 +211,34 @@ pub enum ProfileCreationError {
 
     #[error("IO error: {0}")]
     IOError(#[from] std::io::Error),
+}
+
+/// Display name for a duplicated profile that no existing profile already uses,
+/// so the copy is distinguishable from its source in every instance list.
+fn unique_copy_name(source: &str, existing: &[String]) -> String {
+    let base = format!("{source} (copy)");
+    if !existing.iter().any(|name| name == &base) {
+        return base;
+    }
+    (2..)
+        .map(|n| format!("{source} (copy {n})"))
+        .find(|candidate| !existing.iter().any(|name| name == candidate))
+        .expect("an unused copy name always exists")
+}
+
+#[cfg(test)]
+mod copy_name_tests {
+    use super::unique_copy_name;
+
+    #[test]
+    fn copy_names_never_collide() {
+        let mut names = vec!["World".to_string()];
+        let first = unique_copy_name("World", &names);
+        assert_eq!(first, "World (copy)");
+        names.push(first);
+        let second = unique_copy_name("World", &names);
+        assert_eq!(second, "World (copy 2)");
+        names.push(second);
+        assert_eq!(unique_copy_name("World", &names), "World (copy 3)");
+    }
 }

@@ -197,7 +197,7 @@ label {
   font-weight: 600;
   color: var(--color-secondary);
 }
-input,
+input[type='text'],
 select {
   width: 100%;
   padding: 0.55rem 0.7rem;

@@ -92,9 +92,13 @@ pub async fn download_version_info(
         .await?;
 
         if let Some(loader) = loader {
+            // Per-game-version loader sources (the Quilt fallback) template the URL.
+            let loader_url = loader
+                .url
+                .replace(d::modded::DUMMY_REPLACE_STRING, &version.id);
             let partial: d::modded::PartialVersionInfo = fetch_json(
                 Method::GET,
-                &loader.url,
+                &loader_url,
                 None,
                 None,
                 &st.api_semaphore,

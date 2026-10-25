@@ -175,6 +175,7 @@ async function launchInstance(instance) {
   if (!instance?.path || launchingPath.value || runningPaths.value[instance.path]) return
   launchingPath.value = instance.path
   launchError.value = ''
+  installMessage.value = ''
   javaFixPath.value = ''
   try {
     const outcome = await launchWithPreflight(instance, launcherDeps)
