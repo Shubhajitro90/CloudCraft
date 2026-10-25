@@ -7,13 +7,17 @@ import {
   getLocalServerLogs,
   getLocalServerStatus,
   loadLocalServer,
+  restartLocalServer,
   startLocalServer,
   stopLocalServer,
+  type DownloadedSoftware,
   type LocalServerConfig,
   type LocalServerStatus,
 } from '@/helpers/cloudcraftServer'
 import ServerBackupsPanel from './ServerBackupsPanel.vue'
 import ServerDeletePanel from './ServerDeletePanel.vue'
+import ServerSoftwarePanel from './ServerSoftwarePanel.vue'
+import ServerWorldsPanel from './ServerWorldsPanel.vue'
 
 const LAST_DIRECTORY_KEY = 'cloudcraft.local-server-directory'
 const form = reactive<LocalServerConfig>({
@@ -160,6 +164,29 @@ async function stopServer() {
   }
 }
 
+async function restartServer() {
+  if (busy.value || status.value.state !== 'running') return
+  busy.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    applyStatus(await restartLocalServer(form.serverDir.trim()), true)
+    await refreshLogs()
+    message.value = 'Server restarted.'
+  } catch (caught) {
+    error.value = errorMessage(caught)
+    await refreshStatus(false)
+  } finally {
+    busy.value = false
+  }
+}
+
+function onSoftwareDownloaded(result: DownloadedSoftware, version: string) {
+  form.serverJar = result.path
+  form.gameVersion = version
+  message.value = `${result.fileName} verified. Review the configuration and save it to use this JAR.`
+}
+
 async function forceStop() {
   if (busy.value || !status.value.canForceStop) return
   const confirmed = window.confirm(
@@ -295,14 +322,14 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
             </button>
           </div>
           <small>
-            Download a legitimate server JAR from the
+            Use the checksum-verified downloader below, or pick a JAR you obtained from the
             <a
               href="https://www.minecraft.net/en-us/download/server"
               target="_blank"
               rel="noopener"
             >
               official Minecraft site</a
-            >. CloudCraft does not download or execute arbitrary files.
+            >.
           </small>
         </div>
         <div class="server-field">
@@ -394,6 +421,15 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
           {{ status.state === 'stopping' ? 'Retry graceful stop' : 'Stop gracefully' }}
         </button>
         <button
+          v-if="status.state === 'running'"
+          class="server-secondary"
+          type="button"
+          :disabled="busy"
+          @click="restartServer"
+        >
+          Restart
+        </button>
+        <button
           v-if="status.canForceStop"
           class="server-danger"
           type="button"
@@ -428,6 +464,12 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
       </button>
     </div>
 
+    <ServerSoftwarePanel
+      :server-dir="form.serverDir"
+      :disabled="!canEdit"
+      @downloaded="onSoftwareDownloaded"
+    />
+    <ServerWorldsPanel :server-dir="form.serverDir" :server-active="active" />
     <ServerBackupsPanel :server-dir="form.serverDir" :server-active="active" />
     <ServerDeletePanel :server-dir="form.serverDir" :server-active="active" />
 

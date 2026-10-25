@@ -155,3 +155,85 @@ export async function deleteServerResource(
     confirmation,
   })) as ServerDeletionResult
 }
+
+export type ServerSoftwareKind = 'vanilla' | 'paper'
+
+export interface DownloadedSoftware {
+  path: string
+  fileName: string
+  bytes: number
+  algorithm: 'sha1' | 'sha256'
+  checksum: string
+  reused: boolean
+}
+
+export interface ResolvedSoftware {
+  kind: ServerSoftwareKind
+  version: string
+  build?: number
+  fileName: string
+  url: string
+  size?: number
+  algorithm: 'sha1' | 'sha256'
+  checksum: string
+  javaMajor?: number
+}
+
+export interface WorldExportResult {
+  path: string
+  levelName: string
+  files: number
+  bytes: number
+  archiveBytes: number
+}
+
+export interface WorldImportResult {
+  folder: string
+  files: number
+  bytes: number
+  skippedEntries: number
+}
+
+export async function restartLocalServer(serverDir: string) {
+  return (await invoke('cloudcraft_server_restart', { serverDir })) as LocalServerStatus
+}
+
+export async function listServerSoftwareVersions(kind: ServerSoftwareKind) {
+  return (await invoke('cloudcraft_server_software_versions', { kind })) as string[]
+}
+
+export async function resolveServerSoftware(kind: ServerSoftwareKind, version: string) {
+  return (await invoke('cloudcraft_server_software_resolve', { kind, version })) as ResolvedSoftware
+}
+
+export async function downloadServerSoftware(
+  serverDir: string,
+  kind: ServerSoftwareKind,
+  version: string,
+) {
+  return (await invoke('cloudcraft_server_software_download', {
+    serverDir,
+    kind,
+    version,
+  })) as DownloadedSoftware
+}
+
+export async function exportServerWorld(serverDir: string, destination: string) {
+  return (await invoke('cloudcraft_server_world_export', {
+    serverDir,
+    destination,
+  })) as WorldExportResult
+}
+
+export async function importServerWorld(serverDir: string, source: string, name: string) {
+  return (await invoke('cloudcraft_server_world_import', {
+    serverDir,
+    source,
+    name,
+  })) as WorldImportResult
+}
+
+/** Returns the previous level name. */
+export async function activateServerWorld(serverDir: string, folder: string) {
+  return (await invoke('cloudcraft_server_world_activate', { serverDir, folder })) as string
+}

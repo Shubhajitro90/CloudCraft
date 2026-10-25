@@ -73,6 +73,8 @@ jobs:
             apps/app-frontend/src/components/cloudcraft/ServerDeleteConfirm.vue \
             apps/app-frontend/src/components/cloudcraft/ServerDeletePanel.vue \
             apps/app-frontend/src/components/cloudcraft/ServerOperationProgress.vue \
+            apps/app-frontend/src/components/cloudcraft/ServerSoftwarePanel.vue \
+            apps/app-frontend/src/components/cloudcraft/ServerWorldsPanel.vue \
             apps/app-frontend/src/components/cloudcraft/LauncherAccountPanel.vue \
             apps/app-frontend/src/components/cloudcraft/CreateInstanceForm.vue \
             apps/app-frontend/src/helpers/cloudcraftInstances.ts \
@@ -103,6 +105,8 @@ jobs:
             src/components/cloudcraft/ServerDeleteConfirm.vue \
             src/components/cloudcraft/ServerDeletePanel.vue \
             src/components/cloudcraft/ServerOperationProgress.vue \
+            src/components/cloudcraft/ServerSoftwarePanel.vue \
+            src/components/cloudcraft/ServerWorldsPanel.vue \
             src/components/cloudcraft/LauncherAccountPanel.vue \
             src/components/cloudcraft/CreateInstanceForm.vue \
             src/helpers/cloudcraftInstances.ts \

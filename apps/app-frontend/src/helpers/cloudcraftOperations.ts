@@ -1,4 +1,11 @@
-export type OperationKind = 'backup' | 'verify' | 'restore' | 'delete'
+export type OperationKind =
+  | 'backup'
+  | 'verify'
+  | 'restore'
+  | 'delete'
+  | 'download'
+  | 'import'
+  | 'export'
 export type OperationState = 'running' | 'completed' | 'cancelled' | 'failed'
 
 export interface OperationSnapshot {

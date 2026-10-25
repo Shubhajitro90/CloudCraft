@@ -443,7 +443,7 @@ fn inspect_archive(
     archive: &mut zip::ZipArchive<fs::File>,
     tracker: &Tracker,
 ) -> Result<ZipPlan, OpError> {
-    if archive.len() == 0 {
+    if archive.is_empty() {
         return Err("The archive is empty.".to_string().into());
     }
     if archive.len() > MAX_ENTRIES {
