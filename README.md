@@ -2,13 +2,15 @@
 
 CloudCraft is a desktop Minecraft launcher built on the existing AstralRinth / Theseus-based codebase. It keeps the existing launcher engine and adds an original dark, violet-accented workspace for instances, content discovery, performance settings, and local multiplayer/save utilities.
 
-> **Status:** The CloudCraft interface and launcher integrations are implemented on the `cloudcraft-implementation` branch. This is not a claim that cloud gaming or cloud storage is live. See [the architecture and provider notes](docs/cloudcraft.md) and [the implementation checklist](docs/IMPLEMENTATION_STATUS.md) for exact scope and validation status.
+> **Status:** The CloudCraft interface and launcher integrations are implemented; the most complete branch is `v0/cloudcraft-streaming-e2e`. Cloud gaming works only with a computer you control running Sunshine. No hosted compute provider and no cloud storage provider is connected. See [the architecture and provider notes](docs/cloudcraft.md) and [the implementation checklist](docs/IMPLEMENTATION_STATUS.md) for exact scope and validation status.
 
 ## What works today
 
 - **Existing launcher:** the upstream profile, installation, authentication, Java configuration, and launch systems remain the source of truth.
 - **CloudCraft hub:** a dedicated dashboard with Overview, Cloud, Instances, Mods & modpacks, Performance, Servers, and Saves sections.
-- **Cloud connection setup:** an informational Cloud tab for Kaggle compute and TeraBox storage with official documentation links and honest disconnected status. Provider login, remote game streaming, and cloud-save sync are not yet connected.
+- **Cloud gaming on your own computer:** a remote PC you control runs Minecraft and Sunshine, and CloudCraft starts Moonlight locally to receive video and audio and send input back. Sunshine's certificate is pinned and the password is held in memory only. Start, stop, reconnect, crash recovery and cleanup are handled by the backend session manager. A real Sunshine-to-Moonlight loopback stream passes in CI, but that test streams `glxgears`, not Minecraft.
+- **Cloud usage limits:** two independent, persisted counters: a 12-hour continuous-session limit and a 30-hour weekly allowance that resets Saturday 00:00 UTC. You get warnings at 2 h, 30 min and 5 min remaining and when the weekly allowance runs out. The session is stopped automatically at the limit, and Play is disabled once the week is used up. These figures are CloudCraft's configured policy. Usage is labelled as a local estimate unless a provider reports it.
+- **Kaggle:** not used. Kaggle's Acceptable Use Policy forbids activity unrelated to ML data science, so CloudCraft lists Kaggle as "not permitted by provider" and never starts Kaggle sessions.
 - **Instances:** reads profiles from the existing launcher backend, opens a profile's existing details page, and invokes the normal launch command for installed profiles.
 - **Content discovery:** links into the existing Modrinth-backed browser for mods, modpacks, resource packs, and shaders.
 - **Performance:** reads and saves the launcher's actual global minimum/maximum memory allocation.
@@ -20,7 +22,7 @@ CloudCraft is a desktop Minecraft launcher built on the existing AstralRinth / T
 
 ## What is not connected
 
-- No remote Minecraft client / cloud gaming provider.
+- No hosted compute provider for the remote Minecraft client: you supply the remote computer. Minecraft itself has not been streamed in an automated test, because that needs a licensed account.
 - No remote/hosted multiplayer server provider. The temporary server workflow currently supports local mode only.
 - No cloud storage account, world uploads, cross-device save synchronization, or remote restore service.
 - No new skins/capes service.
