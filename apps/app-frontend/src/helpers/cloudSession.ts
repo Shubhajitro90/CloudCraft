@@ -1,4 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import type { QuotaPolicy, QuotaSnapshot, QuotaWarning } from './cloudQuota'
+
+export const QUOTA_WARNING_EVENT = 'cloudcraft-cloud-quota-warning'
 
 export type CloudSessionState =
   | 'unavailable'
@@ -20,6 +24,8 @@ export interface CloudSessionStatus {
   canCancel: boolean
   canReconnect?: boolean
   cleanupRequired: boolean
+  /** Both usage counters; `canStart` already accounts for `quota.canLaunch`. */
+  quota?: QuotaSnapshot
 }
 
 export interface CloudHostConfig {
@@ -57,6 +63,15 @@ export const cloudSessionProvider = {
   cancelStart: () => invoke<CloudSessionStatus>('cloudcraft_cloud_session_cancel_start'),
   stopSession: () => invoke<CloudSessionStatus>('cloudcraft_cloud_session_stop'),
   reconnect: () => invoke<CloudSessionStatus>('cloudcraft_cloud_session_reconnect'),
+}
+
+export const cloudQuota = {
+  get: () => invoke<QuotaSnapshot>('cloudcraft_cloud_quota_status'),
+  setPolicy: (policy: QuotaPolicy) =>
+    invoke<QuotaSnapshot>('cloudcraft_cloud_quota_set_policy', { policy }),
+  /** Each warning is emitted once by the backend ticker, even across restarts. */
+  onWarning: (handler: (warnings: QuotaWarning[]) => void): Promise<UnlistenFn> =>
+    listen<QuotaWarning[]>(QUOTA_WARNING_EVENT, (event) => handler(event.payload)),
 }
 
 export const cloudHost = {

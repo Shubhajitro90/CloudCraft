@@ -11,6 +11,7 @@ use tauri::{Listener, Manager};
 use theseus::prelude::*;
 
 mod api;
+mod cloudcraft_cloud_quota;
 mod cloudcraft_cloud_session;
 mod cloudcraft_cloud_sunshine;
 mod cloudcraft_launcher;
@@ -680,6 +681,8 @@ fn main() {
             cloudcraft_cloud_session::cloudcraft_cloud_session_cancel_start,
             cloudcraft_cloud_session::cloudcraft_cloud_session_stop,
             cloudcraft_cloud_session::cloudcraft_cloud_session_reconnect,
+            cloudcraft_cloud_session::cloudcraft_cloud_quota_status,
+            cloudcraft_cloud_session::cloudcraft_cloud_quota_set_policy,
             cloudcraft_cloud_session::cloudcraft_cloud_host_get,
             cloudcraft_cloud_session::cloudcraft_cloud_host_probe,
             cloudcraft_cloud_session::cloudcraft_cloud_host_save,

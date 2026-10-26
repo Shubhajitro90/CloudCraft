@@ -2,12 +2,15 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   cloudHost,
+  cloudQuota,
   cloudSessionProvider,
   cloudSessionStateLabel,
   formatFingerprint,
   latencyQuality,
 } from '@/helpers/cloudSession'
+import { mergeAlerts } from '@/helpers/cloudQuota'
 import { validateCloudHostForm } from '@/helpers/cloudcraftDiagnostics'
+import CloudQuotaCard from '@/components/cloudcraft/CloudQuotaCard.vue'
 
 const emit = defineEmits(['status'])
 
@@ -66,6 +69,18 @@ const sessionActive = computed(
     ['starting', 'ready', 'stopping'].includes(status.value.state) || status.value.cleanupRequired,
 )
 const quality = computed(() => latencyQuality(latency.value))
+const alerts = ref([])
+const quotaBlocksPlay = computed(
+  () =>
+    !!status.value.quota &&
+    !status.value.quota.canLaunch &&
+    !sessionActive.value &&
+    status.value.state !== 'unavailable',
+)
+
+function dismissAlert(id) {
+  alerts.value = alerts.value.filter((alert) => alert.id !== id)
+}
 
 function fillForm(source) {
   form.host = source?.host || ''
@@ -233,7 +248,13 @@ watch(showLogs, (open) => {
   if (open) loadLogs()
 })
 
+let unlistenWarnings = null
 onMounted(async () => {
+  unlistenWarnings = await cloudQuota
+    .onWarning((warnings) => {
+      alerts.value = mergeAlerts(alerts.value, warnings)
+    })
+    .catch(() => null)
   await refresh()
   healthTimer = setInterval(healthTick, 5000)
 })
@@ -241,6 +262,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   clearInterval(healthTimer)
   if (startPoll) clearInterval(startPoll)
+  if (unlistenWarnings) unlistenWarnings()
 })
 </script>
 
@@ -289,6 +311,27 @@ onBeforeUnmount(() => {
       </p>
     </div>
 
+    <ul v-if="alerts.length" class="alerts" aria-label="Usage warnings">
+      <li
+        v-for="alert in alerts"
+        :key="alert.id"
+        :class="`alert-${alert.level}`"
+        :role="alert.level === 'critical' ? 'alert' : 'status'"
+      >
+        <span>{{ alert.message }}</span>
+        <button
+          class="dismiss"
+          type="button"
+          aria-label="Dismiss warning"
+          @click="dismissAlert(alert.id)"
+        >
+          ×
+        </button>
+      </li>
+    </ul>
+
+    <CloudQuotaCard :quota="status.quota || null" />
+
     <div class="actions">
       <button
         v-if="status.canStart"
@@ -298,6 +341,16 @@ onBeforeUnmount(() => {
         @click="start"
       >
         {{ busy === 'start' ? 'Starting…' : 'Start cloud session' }}
+      </button>
+      <button
+        v-else-if="quotaBlocksPlay"
+        class="button primary"
+        type="button"
+        disabled
+        :title="status.quota.blockReason || ''"
+        aria-describedby="quota-heading"
+      >
+        Start cloud session (weekly allowance used)
       </button>
       <button
         v-if="status.state === 'starting'"
@@ -575,6 +628,44 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+.alerts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.alerts li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.6rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.alert-info {
+  background: rgba(139, 92, 246, 0.15);
+  color: #c4b5fd;
+}
+.alert-warning {
+  background: rgba(234, 179, 8, 0.15);
+  color: #facc15;
+}
+.alert-critical {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+.dismiss {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
 }
 .button {
   padding: 0.5rem 1rem;

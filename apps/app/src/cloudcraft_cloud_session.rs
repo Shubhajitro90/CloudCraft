@@ -12,6 +12,9 @@
 //! may exist it must return their identifier in [`ProviderError::remote_id`] so
 //! the manager can retain it and require an explicit, successful `stop`.
 
+use crate::cloudcraft_cloud_quota::{
+    EndReason, QuotaLedger, QuotaPolicy, QuotaSnapshot, QuotaWarning,
+};
 use crate::cloudcraft_cloud_sunshine::{
     probe_certificate, ProviderView, SunshineConfig, SunshineProvider,
 };
@@ -21,6 +24,18 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Seconds since the Unix epoch. Injected so quota limits are testable.
+pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+
+pub fn system_clock() -> Clock {
+    Arc::new(|| Utc::now().timestamp())
+}
+
+/// How often the background task checks session health, records activity,
+/// announces quota warnings, and enforces the session deadline.
+const QUOTA_TICK: Duration = Duration::from_secs(15);
+pub const QUOTA_WARNING_EVENT: &str = "cloudcraft-cloud-quota-warning";
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tokio::sync::Notify;
@@ -105,6 +120,11 @@ pub trait CloudSessionProvider: Send + Sync {
     fn supports_reconnect(&self) -> bool {
         false
     }
+    /// Authoritative compute seconds used in the current quota week, when the
+    /// provider exposes them. `None` keeps usage labelled as a local estimate.
+    fn reported_weekly_usage_secs(&self) -> Option<u64> {
+        None
+    }
     /// Re-attaches the local stream to a remote session that is still allocated.
     fn reconnect<'a>(
         &'a self,
@@ -184,6 +204,8 @@ pub struct SessionSnapshot {
     pub can_reconnect: bool,
     /// True when remote resources may still exist and need a successful stop.
     pub cleanup_required: bool,
+    /// Continuous-session and weekly usage. `can_start` already includes `quota.can_launch`.
+    pub quota: QuotaSnapshot,
 }
 
 /// Persisted to disk. Contains no credentials, tokens, or account data.
@@ -265,11 +287,14 @@ enum StartOutcome {
     Cancelled,
 }
 
+/// Lock order: `inner` before `quota`, never the reverse.
 pub struct SessionManager {
     inner: Mutex<Inner>,
+    quota: Mutex<QuotaLedger>,
     provider: Arc<dyn CloudSessionProvider>,
     store_path: PathBuf,
     timeouts: Timeouts,
+    clock: Clock,
 }
 
 impl SessionManager {
@@ -278,6 +303,15 @@ impl SessionManager {
         store_path: PathBuf,
         provider: Arc<dyn CloudSessionProvider>,
         timeouts: Timeouts,
+    ) -> Self {
+        Self::with_clock(store_path, provider, timeouts, system_clock())
+    }
+
+    pub fn with_clock(
+        store_path: PathBuf,
+        provider: Arc<dyn CloudSessionProvider>,
+        timeouts: Timeouts,
+        clock: Clock,
     ) -> Self {
         let mut inner = Inner {
             state: SessionState::Idle,
@@ -289,11 +323,20 @@ impl SessionManager {
             control: None,
         };
         Self::recover(&store_path, &mut inner);
+        let now = clock();
+        let mut quota = QuotaLedger::load(
+            store_path.with_file_name("cloudcraft-cloud-quota.json"),
+            now,
+        );
+        // A recorded remote id means the remote side may still be running, so it keeps counting.
+        quota.recover(inner.remote_id.is_some(), now);
         let manager = Self {
             inner: Mutex::new(inner),
+            quota: Mutex::new(quota),
             provider,
             store_path,
             timeouts,
+            clock,
         };
         {
             let inner = manager.lock();
@@ -353,6 +396,112 @@ impl SessionManager {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    fn lock_quota(&self) -> MutexGuard<'_, QuotaLedger> {
+        self.quota
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn end_usage(&self, inner: &Inner, reason: EndReason) {
+        if let Some(session_id) = inner.session_id.as_deref() {
+            self.lock_quota().end(session_id, (self.clock)(), reason);
+        }
+    }
+
+    /// Health check plus activity heartbeat. Only a healthy or starting
+    /// session counts as confirmed activity for crash recovery.
+    fn observe(&self, inner: &mut Inner) {
+        self.refresh_availability(inner);
+        if inner.state == SessionState::Ready {
+            let problem = inner
+                .remote_id
+                .as_deref()
+                .and_then(|id| self.provider.health(id));
+            if let Some(problem) = problem {
+                inner.force_state(SessionState::Error, problem);
+                self.persist(inner);
+            }
+        }
+        if matches!(inner.state, SessionState::Ready | SessionState::Starting) {
+            self.lock_quota().heartbeat((self.clock)());
+        }
+    }
+
+    pub fn quota_status(&self) -> QuotaSnapshot {
+        self.lock_quota().snapshot((self.clock)())
+    }
+
+    pub fn set_quota_policy(
+        &self,
+        policy: QuotaPolicy,
+    ) -> Result<QuotaSnapshot, String> {
+        let now = (self.clock)();
+        let mut quota = self.lock_quota();
+        quota.set_policy(policy, now)?;
+        Ok(quota.snapshot(now))
+    }
+
+    /// Periodic work: health, heartbeat, deadline enforcement. Returns warnings
+    /// that have not been announced before (each is announced once).
+    pub async fn tick(&self) -> Vec<QuotaWarning> {
+        {
+            let mut inner = self.lock();
+            self.observe(&mut inner);
+        }
+        let reported = self.provider.reported_weekly_usage_secs();
+        let warnings = {
+            let now = (self.clock)();
+            let mut quota = self.lock_quota();
+            if let Some(used) = reported {
+                quota.apply_provider_usage(used, now);
+            }
+            quota.take_new_warnings(now)
+        };
+        self.enforce().await;
+        warnings
+    }
+
+    /// Stops the session once either limit is reached. CloudCraft cannot save
+    /// a world inside the remote client; the warnings beforehand tell the
+    /// player to save in-game, and the end record says progress may be lost.
+    pub async fn enforce(&self) -> Option<SessionSnapshot> {
+        let reason = self.lock_quota().enforcement((self.clock)())?;
+        {
+            let mut inner = self.lock();
+            let message = match reason {
+                EndReason::WeeklyAllowance => "The weekly cloud allowance ran out. Stopping the cloud session…",
+                _ => "The continuous-session limit was reached. Stopping the cloud session…",
+            };
+            match inner.state {
+                SessionState::Ready => {
+                    inner.force_state(SessionState::Stopping, message)
+                }
+                SessionState::Error if inner.remote_id.is_some() => {
+                    inner.force_state(SessionState::Stopping, message)
+                }
+                SessionState::Starting => {
+                    if let Some(control) = inner.control.as_ref() {
+                        control.cancel();
+                    }
+                    return Some(self.snapshot_of(&inner));
+                }
+                _ => {
+                    // Nothing remote is held; close the counter so it cannot keep running.
+                    let active = self
+                        .lock_quota()
+                        .active_session_id()
+                        .map(str::to_string);
+                    if let Some(id) = active {
+                        self.lock_quota().end(&id, (self.clock)(), reason);
+                    }
+                    return Some(self.snapshot_of(&inner));
+                }
+            }
+            self.persist(&inner);
+        }
+        Some(self.finish_stop(reason).await)
+    }
+
     fn persist(&self, inner: &Inner) {
         let record = PersistedSession {
             version: METADATA_VERSION,
@@ -403,7 +552,9 @@ impl SessionManager {
         let unavailable = self.provider.unavailable_reason().is_some();
         let cancel_requested =
             inner.control.as_ref().is_some_and(|c| c.is_cancelled());
+        let quota = self.quota_status();
         let can_start = !unavailable
+            && quota.can_launch
             && match inner.state {
                 SessionState::Idle | SessionState::Stopped => true,
                 SessionState::Error => inner.remote_id.is_none(),
@@ -433,22 +584,13 @@ impl SessionManager {
                     inner.state,
                     SessionState::Stopped | SessionState::Idle
                 ),
+            quota,
         }
     }
 
     pub fn status(&self) -> SessionSnapshot {
         let mut inner = self.lock();
-        self.refresh_availability(&mut inner);
-        if inner.state == SessionState::Ready {
-            let problem = inner
-                .remote_id
-                .as_deref()
-                .and_then(|id| self.provider.health(id));
-            if let Some(problem) = problem {
-                inner.force_state(SessionState::Error, problem);
-                self.persist(&inner);
-            }
-        }
+        self.observe(&mut inner);
         self.snapshot_of(&inner)
     }
 
@@ -522,9 +664,20 @@ impl SessionManager {
                 }
                 _ => {}
             }
-            inner
-                .set_state(SessionState::Starting, "Starting cloud session…")?;
-            inner.session_id = Some(uuid::Uuid::new_v4().to_string());
+            // Eligibility is rechecked on every launch; this also starts both usage counters.
+            let session_id = uuid::Uuid::new_v4().to_string();
+            self.lock_quota().begin(&session_id, (self.clock)())?;
+            if let Err(error) = inner
+                .set_state(SessionState::Starting, "Starting cloud session…")
+            {
+                self.lock_quota().end(
+                    &session_id,
+                    (self.clock)(),
+                    EndReason::StartFailed,
+                );
+                return Err(error);
+            }
+            inner.session_id = Some(session_id);
             inner.remote_id = None;
             inner.game_version = request.game_version.clone();
             let control = Arc::new(StartControl::default());
@@ -574,6 +727,10 @@ impl SessionManager {
                             error.message
                         ),
                     );
+                    // Possibly-live remote resources keep counting until stopped.
+                    if inner.remote_id.is_none() {
+                        self.end_usage(&inner, EndReason::StartFailed);
+                    }
                     false
                 }
                 StartOutcome::TimedOut => {
@@ -581,6 +738,7 @@ impl SessionManager {
                         SessionState::Error,
                         "Cloud session start timed out. The provider may still be provisioning; check it for leftover resources.",
                     );
+                    self.end_usage(&inner, EndReason::StartFailed);
                     false
                 }
                 StartOutcome::Cancelled => {
@@ -588,6 +746,7 @@ impl SessionManager {
                         SessionState::Stopped,
                         "Start cancelled. The provider had not reported any remote resource.",
                     );
+                    self.end_usage(&inner, EndReason::Cancelled);
                     false
                 }
             };
@@ -596,7 +755,7 @@ impl SessionManager {
         };
 
         if release_after_cancel {
-            return Ok(self.finish_stop().await);
+            return Ok(self.finish_stop(EndReason::Cancelled).await);
         }
         Ok(self.status())
     }
@@ -644,6 +803,7 @@ impl SessionManager {
                             SessionState::Stopped,
                             "No remote resources were recorded for this session.",
                         );
+                        self.end_usage(&inner, EndReason::Stopped);
                         self.persist(&inner);
                         return self.snapshot_of(&inner);
                     }
@@ -651,10 +811,12 @@ impl SessionManager {
             }
             self.persist(&inner);
         }
-        self.finish_stop().await
+        self.finish_stop(EndReason::Stopped).await
     }
 
-    async fn finish_stop(&self) -> SessionSnapshot {
+    /// Usage stops counting only once the provider confirms release; a failed
+    /// stop keeps the counters running because the remote side may still be live.
+    async fn finish_stop(&self, reason: EndReason) -> SessionSnapshot {
         let remote_id = self.lock().remote_id.clone();
         let result = match remote_id {
             None => Ok(()),
@@ -674,7 +836,13 @@ impl SessionManager {
         match result {
             Ok(()) => {
                 inner.remote_id = None;
-                inner.force_state(SessionState::Stopped, "Cloud session stopped.");
+                let message = match reason {
+                    EndReason::SessionLimit => "Cloud session stopped: the continuous-session limit was reached. Progress not saved in Minecraft before the limit may be lost.",
+                    EndReason::WeeklyAllowance => "Cloud session stopped: the weekly cloud allowance ran out. Progress not saved in Minecraft before the limit may be lost.",
+                    _ => "Cloud session stopped.",
+                };
+                inner.force_state(SessionState::Stopped, message);
+                self.end_usage(&inner, reason);
             }
             Err(message) => inner.force_state(
                 SessionState::Error,
@@ -768,7 +936,24 @@ fn manager(app: &tauri::AppHandle) -> Result<&'static SessionManager, String> {
 pub fn init(app: &tauri::AppHandle) {
     if let Err(error) = manager(app) {
         tracing::warn!("CloudCraft cloud session init failed: {error}");
+        return;
     }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        use tauri::Emitter;
+        loop {
+            tokio::time::sleep(QUOTA_TICK).await;
+            let Some(manager) = MANAGER.get() else {
+                continue;
+            };
+            let warnings = manager.tick().await;
+            if !warnings.is_empty() {
+                if let Err(error) = app.emit(QUOTA_WARNING_EVENT, &warnings) {
+                    tracing::warn!("Could not deliver quota warning: {error}");
+                }
+            }
+        }
+    });
 }
 
 /// Kills the local stream client on launcher exit.
@@ -902,6 +1087,21 @@ pub async fn cloudcraft_cloud_session_stop(
     Ok(manager(&app)?.stop().await)
 }
 
+#[tauri::command]
+pub fn cloudcraft_cloud_quota_status(
+    app: tauri::AppHandle,
+) -> Result<QuotaSnapshot, String> {
+    Ok(manager(&app)?.quota_status())
+}
+
+#[tauri::command]
+pub fn cloudcraft_cloud_quota_set_policy(
+    app: tauri::AppHandle,
+    policy: QuotaPolicy,
+) -> Result<QuotaSnapshot, String> {
+    manager(&app)?.set_quota_policy(policy)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -924,6 +1124,7 @@ mod tests {
         stop_calls: AtomicUsize,
         stream_lost: AtomicBool,
         reconnect_fails: AtomicBool,
+        reported_usage: Mutex<Option<u64>>,
     }
 
     impl FakeProvider {
@@ -934,6 +1135,7 @@ mod tests {
                 stop_fails: AtomicBool::new(false),
                 stream_lost: AtomicBool::new(false),
                 reconnect_fails: AtomicBool::new(false),
+                reported_usage: Mutex::new(None),
                 start_calls: AtomicUsize::new(0),
                 stop_calls: AtomicUsize::new(0),
             })
@@ -1006,6 +1208,10 @@ mod tests {
 
         fn supports_reconnect(&self) -> bool {
             true
+        }
+
+        fn reported_weekly_usage_secs(&self) -> Option<u64> {
+            *self.reported_usage.lock().unwrap()
         }
 
         fn reconnect<'a>(
@@ -1375,6 +1581,179 @@ mod tests {
             .unwrap_err();
         assert!(error.contains("unsupported characters"));
         assert_eq!(provider.start_calls.load(Ordering::SeqCst), 0);
+    }
+
+    use std::sync::atomic::AtomicI64;
+
+    /// 2024-01-06 00:00:00 UTC, the start of a default quota week.
+    const SAT: i64 = 1_704_499_200;
+    const HOUR: i64 = 3600;
+
+    fn clocked(
+        provider: Arc<FakeProvider>,
+        store: PathBuf,
+        now: &Arc<AtomicI64>,
+    ) -> SessionManager {
+        let now = now.clone();
+        SessionManager::with_clock(
+            store,
+            provider,
+            quick(),
+            Arc::new(move || now.load(Ordering::SeqCst)),
+        )
+    }
+
+    #[tokio::test]
+    async fn session_limit_stops_the_session_and_records_usage() {
+        let now = Arc::new(AtomicI64::new(SAT));
+        let provider = FakeProvider::new(StartBehavior::Succeed);
+        let manager = clocked(provider.clone(), temp_store(), &now);
+        let ready = manager.start(StartRequest::default()).await.unwrap();
+        assert_eq!(ready.state, SessionState::Ready);
+        assert_eq!(ready.quota.session_remaining_secs, Some(12 * 3600));
+
+        now.store(SAT + 10 * HOUR, Ordering::SeqCst);
+        let warnings = manager.tick().await;
+        assert_eq!(warnings.len(), 1, "two-hour warning");
+        assert_eq!(manager.status().state, SessionState::Ready);
+
+        now.store(SAT + 12 * HOUR, Ordering::SeqCst);
+        manager.tick().await;
+        let stopped = manager.status();
+        assert_eq!(stopped.state, SessionState::Stopped);
+        assert!(stopped.message.contains("continuous-session limit"));
+        assert_eq!(provider.stop_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(stopped.quota.weekly_used_secs, 12 * 3600);
+        assert!(!stopped.quota.session_active);
+        let end = stopped.quota.last_session_end.unwrap();
+        assert_eq!(end.reason, EndReason::SessionLimit);
+    }
+
+    #[tokio::test]
+    async fn exhausted_weekly_allowance_disables_play() {
+        let now = Arc::new(AtomicI64::new(SAT));
+        let provider = FakeProvider::new(StartBehavior::Succeed);
+        let manager = clocked(provider.clone(), temp_store(), &now);
+        for day in 0..3 {
+            now.store(SAT + day * 24 * HOUR, Ordering::SeqCst);
+            manager.start(StartRequest::default()).await.unwrap();
+            now.store(SAT + day * 24 * HOUR + 10 * HOUR, Ordering::SeqCst);
+            assert_eq!(manager.stop().await.state, SessionState::Stopped);
+        }
+        let status = manager.status();
+        assert_eq!(status.quota.weekly_remaining_secs, 0);
+        assert!(!status.can_start, "Play is disabled");
+        let error = manager.start(StartRequest::default()).await.unwrap_err();
+        assert!(error.contains("weekly cloud allowance"));
+        assert_eq!(provider.start_calls.load(Ordering::SeqCst), 3);
+
+        now.store(SAT + 7 * 24 * HOUR, Ordering::SeqCst);
+        assert!(manager.status().can_start, "re-enabled after the reset");
+    }
+
+    #[tokio::test]
+    async fn stop_twice_counts_usage_once() {
+        let now = Arc::new(AtomicI64::new(SAT));
+        let manager = clocked(
+            FakeProvider::new(StartBehavior::Succeed),
+            temp_store(),
+            &now,
+        );
+        manager.start(StartRequest::default()).await.unwrap();
+        now.store(SAT + HOUR, Ordering::SeqCst);
+        manager.stop().await;
+        now.store(SAT + 2 * HOUR, Ordering::SeqCst);
+        manager.stop().await;
+        assert_eq!(manager.status().quota.weekly_used_secs, 3600);
+    }
+
+    #[tokio::test]
+    async fn failed_stop_keeps_counting_until_released() {
+        let now = Arc::new(AtomicI64::new(SAT));
+        let provider = FakeProvider::new(StartBehavior::Succeed);
+        let manager = clocked(provider.clone(), temp_store(), &now);
+        manager.start(StartRequest::default()).await.unwrap();
+        provider.stop_fails.store(true, Ordering::SeqCst);
+        now.store(SAT + HOUR, Ordering::SeqCst);
+        assert_eq!(manager.stop().await.state, SessionState::Error);
+        now.store(SAT + 3 * HOUR, Ordering::SeqCst);
+        assert_eq!(manager.status().quota.weekly_used_secs, 3 * 3600);
+        provider.stop_fails.store(false, Ordering::SeqCst);
+        manager.stop().await;
+        now.store(SAT + 5 * HOUR, Ordering::SeqCst);
+        assert_eq!(manager.status().quota.weekly_used_secs, 3 * 3600);
+    }
+
+    #[tokio::test]
+    async fn restart_with_live_remote_keeps_usage_and_relaunch_is_rechecked() {
+        let now = Arc::new(AtomicI64::new(SAT));
+        let store = temp_store();
+        {
+            let manager = clocked(
+                FakeProvider::new(StartBehavior::Succeed),
+                store.clone(),
+                &now,
+            );
+            manager.start(StartRequest::default()).await.unwrap();
+            now.store(SAT + HOUR, Ordering::SeqCst);
+            manager.tick().await;
+        }
+        now.store(SAT + 4 * HOUR, Ordering::SeqCst);
+        let provider = FakeProvider::new(StartBehavior::Succeed);
+        let manager = clocked(provider.clone(), store, &now);
+        let recovered = manager.status();
+        assert_eq!(recovered.state, SessionState::Error);
+        assert!(
+            recovered.quota.session_active,
+            "remote may be live: still counting"
+        );
+        assert_eq!(recovered.quota.session_elapsed_secs, Some(4 * 3600));
+        assert!(!recovered.can_start);
+        assert_eq!(manager.stop().await.state, SessionState::Stopped);
+        let after = manager.status();
+        assert_eq!(after.quota.weekly_used_secs, 4 * 3600);
+        assert!(after.can_start);
+    }
+
+    #[tokio::test]
+    async fn cancelled_and_failed_starts_close_the_counter() {
+        let now = Arc::new(AtomicI64::new(SAT));
+        let provider = FakeProvider::new(StartBehavior::Fail);
+        let manager = clocked(provider.clone(), temp_store(), &now);
+        manager.start(StartRequest::default()).await.unwrap();
+        let status = manager.status();
+        assert_eq!(status.state, SessionState::Error);
+        assert!(!status.quota.session_active);
+        assert!(status.can_start);
+        assert_eq!(
+            status.quota.last_session_end.unwrap().reason,
+            EndReason::StartFailed
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_reported_usage_is_authoritative() {
+        let now = Arc::new(AtomicI64::new(SAT));
+        let provider = FakeProvider::new(StartBehavior::Succeed);
+        let manager = clocked(provider.clone(), temp_store(), &now);
+        manager.start(StartRequest::default()).await.unwrap();
+        assert_eq!(
+            manager.status().quota.source,
+            crate::cloudcraft_cloud_quota::UsageSource::LocalEstimate
+        );
+        *provider.reported_usage.lock().unwrap() = Some(29 * 3600);
+        now.store(SAT + 60, Ordering::SeqCst);
+        manager.tick().await;
+        let status = manager.status();
+        assert_eq!(
+            status.quota.source,
+            crate::cloudcraft_cloud_quota::UsageSource::Provider
+        );
+        assert_eq!(status.quota.weekly_used_secs, 29 * 3600);
+        assert_eq!(
+            status.quota.binding_limit,
+            Some(crate::cloudcraft_cloud_quota::LimitKind::Weekly)
+        );
     }
 
     #[test]
