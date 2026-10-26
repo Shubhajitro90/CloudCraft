@@ -33,6 +33,10 @@ PIN="$(printf '%04d' $((RANDOM % 10000)))"
 PASSWORD="$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)"
 
 WORK="$(mktemp -d)"
+# Sunshine and Moonlight get an isolated HOME; keep cargo/rustup pointed at the real one.
+export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}"
 export HOME="$WORK/home"
 export XDG_RUNTIME_DIR="$WORK/xdg"
 mkdir -p "$HOME/.config/sunshine" "$XDG_RUNTIME_DIR"
