@@ -215,3 +215,62 @@ jobs:
         env:
           CLOUDCRAFT_REAL_JAVA: ${{ steps.java.outputs.path }}/bin/java
         run: cargo test --package theseus_gui --no-default-features -- --ignored --nocapture --skip real_sunshine
+
+  streaming-e2e:
+    name: Real Sunshine to Moonlight stream (loopback, no secrets)
+    # Ubuntu 24.04 matches the Sunshine package below (glibc 2.39).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SUNSHINE_VERSION: v2026.914.233613
+      SUNSHINE_DEB: sunshine_2026.914.233613-1+ubuntu24.04_amd64.deb
+      SUNSHINE_SHA256: c38e9c705f650f8705f61702717e99bec34044c5028fcb8f23a08fe041292c21
+      MOONLIGHT_VERSION: v6.2.0
+      MOONLIGHT_APPIMAGE: Moonlight-6.2.0-x86_64.AppImage
+      MOONLIGHT_SHA256: 787b0dcbd42ae90620e76fb8d77d7c441ba6473a91c2d7fc3a0fc2466f992437
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install build, display and audio dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential libssl-dev libxdo-dev libayatana-appindicator3-dev \
+            librsvg2-dev libwebkit2gtk-4.1-dev pkg-config \
+            xvfb xauth x11-apps mesa-utils libegl1 libgl1-mesa-dri \
+            pulseaudio openssl curl
+
+      - name: Download and verify Sunshine and Moonlight (pinned SHA-256)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/stream" && cd "$RUNNER_TEMP/stream"
+          curl -fsSL -o "$SUNSHINE_DEB" "https://github.com/LizardByte/Sunshine/releases/download/$SUNSHINE_VERSION/$SUNSHINE_DEB"
+          curl -fsSL -o "$MOONLIGHT_APPIMAGE" "https://github.com/moonlight-stream/moonlight-qt/releases/download/$MOONLIGHT_VERSION/$MOONLIGHT_APPIMAGE"
+          printf '%s  %s\n%s  %s\n' "$SUNSHINE_SHA256" "$SUNSHINE_DEB" "$MOONLIGHT_SHA256" "$MOONLIGHT_APPIMAGE" | sha256sum --check --strict
+          sudo apt-get install -y "./$SUNSHINE_DEB"
+          chmod +x "$MOONLIGHT_APPIMAGE"
+          # No FUSE on runners: extract and run the real ELF binary, not the AppRun wrapper.
+          "./$MOONLIGHT_APPIMAGE" --appimage-extract >/dev/null
+          test -x squashfs-root/usr/bin/moonlight
+          echo "CLOUDCRAFT_MOONLIGHT=$RUNNER_TEMP/stream/squashfs-root/usr/bin/moonlight" >> "$GITHUB_ENV"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the desktop test binary
+        run: cargo test --package theseus_gui --no-default-features --no-run
+
+      - name: Stream end to end
+        env:
+          CC_EVIDENCE_DIR: ${{ runner.temp }}/sunshine-e2e
+          CC_HOLD_SECS: '15'
+        run: bash .github/scripts/sunshine-loopback-e2e.sh
+
+      - name: Upload stream evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sunshine-e2e-evidence
+          path: ${{ runner.temp }}/sunshine-e2e
+          if-no-files-found: warn
