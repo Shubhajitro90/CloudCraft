@@ -148,7 +148,7 @@ import { handleError } from '@/store/notifications.js'
 import { get_many } from '@/helpers/profile.js'
 import { trackEvent } from '@/helpers/analytics'
 import { getVersion } from '@tauri-apps/api/app'
-import { installState, getRemote, updateState } from '@/helpers/update.js'
+import { installState, getRemote, updateState, updateError } from '@/helpers/update.js'
 import ModalWrapper from './modal/ModalWrapper.vue'
 
 const version = await getVersion()
@@ -161,7 +161,10 @@ const confirmUpdating = async () => {
 
 const approveUpdate = async () => {
   confirmUpdate.value.hide()
-  await getRemote(true, true)
+  const ok = await getRemote(true, true)
+  if (!ok && updateError.value) {
+    handleError(new Error(`CloudCraft update was not installed: ${updateError.value}`))
+  }
 }
 
 await getRemote(true, false)

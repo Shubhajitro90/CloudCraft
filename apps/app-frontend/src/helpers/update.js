@@ -7,6 +7,8 @@ export const installState = ref(false)
 export const updateState = ref(false)
 export const latestBetaCommitTruncatedSha = ref('')
 export const latestBetaCommitLink = ref('')
+// Set when the verified installer download fails (missing SHA256SUMS.txt, checksum mismatch, network).
+export const updateError = ref('')
 
 const os = ref('')
 
@@ -89,6 +91,7 @@ export async function getRemote(elementIdBool, downloadArtifactBool) {
     }
 
     if (downloadArtifactBool) {
+      updateError.value = ''
       installState.value = true
       try {
         const installer = getInstaller(getExtension(), data.assets || [])
@@ -105,6 +108,7 @@ export async function getRemote(elementIdBool, downloadArtifactBool) {
     return true
   } catch (error) {
     console.error(failedFetch[0], error)
+    if (downloadArtifactBool) updateError.value = String(error?.message || error)
     if (!elementIdBool) {
       const errorData = document.getElementById('releaseData')
       if (errorData) errorData.textContent = String(error?.message || error)

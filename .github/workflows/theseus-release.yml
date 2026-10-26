@@ -34,6 +34,9 @@ jobs:
         platform: [macos-latest, windows-latest, ubuntu-latest]
 
     runs-on: ${{ matrix.platform }}
+    env:
+      HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      HAS_WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -112,24 +115,109 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev pkg-config libayatana-appindicator3-dev librsvg2-dev
 
       - name: Install frontend dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      # Platform signing is optional and driven only by repository secrets. When a
+      # secret is absent the build is produced unsigned and reported as unsigned.
+      # See docs/RELEASING.md for the secret names and how to create them.
+      - name: Configure macOS signing (only when secrets exist)
+        if: startsWith(matrix.platform, 'macos') && env.HAS_APPLE_CERTIFICATE == 'true'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then echo "::error::$name is required when APPLE_CERTIFICATE is set"; exit 1; fi
+            # Values go to GITHUB_ENV through a heredoc so they are never echoed.
+            { echo "$name<<__CC_EOF__"; echo "${!name}"; echo "__CC_EOF__"; } >> "$GITHUB_ENV"
+          done
+
+      - name: Configure Windows signing (only when secrets exist)
+        if: startsWith(matrix.platform, 'windows') && env.HAS_WINDOWS_CERTIFICATE == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'cloudcraft-signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          "CLOUDCRAFT_WINDOWS_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Write CI Tauri config
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const config = JSON.parse(fs.readFileSync("apps/app/tauri-release.conf.json", "utf8"));
+            const thumbprint = process.env.CLOUDCRAFT_WINDOWS_THUMBPRINT;
+            if (thumbprint) config.bundle = { windows: { certificateThumbprint: thumbprint } };
+            fs.writeFileSync("apps/app/tauri-ci.conf.json", JSON.stringify(config, null, 2));
+          '
 
       - name: build app (macos)
-        run: pnpm --filter=@modrinth/app run tauri build --target universal-apple-darwin --config "tauri-release.conf.json"
+        run: pnpm --filter=@modrinth/app run tauri build --target universal-apple-darwin --config "tauri-ci.conf.json"
         if: startsWith(matrix.platform, 'macos')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
       - name: build app
-        run: pnpm --filter=@modrinth/app run tauri build --config "tauri-release.conf.json"
+        run: pnpm --filter=@modrinth/app run tauri build --config "tauri-ci.conf.json"
         id: build_os
         if: "!startsWith(matrix.platform, 'macos')"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+      - name: Validate installers and write checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p cloudcraft-dist
+          find target -path '*/release/bundle/*' -type f \
+            \( -name '*.dmg' -o -name '*.msi' -o -name '*-setup.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
+            -print | while read -r f; do
+            [ -s "$f" ] || { echo "::error::empty installer $f"; exit 1; }
+            cp "$f" cloudcraft-dist/
+          done
+          count=$(ls cloudcraft-dist | wc -l)
+          [ "$count" -gt 0 ] || { echo "::error::no installers were produced"; exit 1; }
+          cd cloudcraft-dist
+          if command -v sha256sum >/dev/null; then sha256sum -- * > "SHA256SUMS-${{ matrix.platform }}.txt"; else shasum -a 256 -- * > "SHA256SUMS-${{ matrix.platform }}.txt"; fi
+          {
+            echo "### Installers (${{ matrix.platform }})"
+            echo '```'
+            cat "SHA256SUMS-${{ matrix.platform }}.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report signature status
+        shell: bash
+        run: |
+          cd cloudcraft-dist
+          case "${{ matrix.platform }}" in
+            macos*)
+              for f in *.dmg; do
+                if codesign --verify --verbose=2 "$f" 2>/dev/null; then echo "$f: signed" >> "$GITHUB_STEP_SUMMARY"; else echo "$f: UNSIGNED" >> "$GITHUB_STEP_SUMMARY"; fi
+              done ;;
+            windows*)
+              pwsh -NoProfile -Command 'Get-ChildItem *.exe,*.msi | ForEach-Object { "$($_.Name): $((Get-AuthenticodeSignature $_.FullName).Status)" }' >> "$GITHUB_STEP_SUMMARY" ;;
+            *)
+              echo "Linux packages are not code-signed; verify them with SHA256SUMS.txt." >> "$GITHUB_STEP_SUMMARY" ;;
+          esac
+
+      - name: Upload checksummed installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: CloudCraft-dist-${{ matrix.platform }}
+          if-no-files-found: error
+          path: cloudcraft-dist/*
 
       - name: Upload CloudCraft installer artifacts
         uses: actions/upload-artifact@v4

@@ -29,15 +29,15 @@ pub async fn get_artifact(
     filename: &str,
     ostype: &str,
     autoupdatesupported: bool,
-) -> Result<()> {
-    theseus::download::init_download(
+) -> Result<String> {
+    let path = theseus::download::init_download(
         downloadurl,
         filename,
         ostype,
         autoupdatesupported,
     )
-    .await;
-    Ok(())
+    .await?;
+    Ok(path.display().to_string())
 }
 
 /// Gets OS
