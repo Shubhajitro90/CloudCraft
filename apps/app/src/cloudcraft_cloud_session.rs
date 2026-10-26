@@ -2,15 +2,19 @@
 //!
 //! This module owns the session state machine, duplicate-start prevention,
 //! start cancellation, idempotent stop, timeouts, crash recovery, and
-//! credential-free metadata persistence. It does NOT provision anything: the
-//! only provider shipped today is [`UnconfiguredProvider`], which always
-//! reports the feature as unavailable and never creates remote resources.
+//! credential-free metadata persistence. Providers do the remote work: the
+//! desktop app uses the self-hosted Sunshine/Moonlight provider
+//! (`cloudcraft_cloud_sunshine`), and [`UnconfiguredProvider`] remains as the
+//! inert provider for tests and builds without a host.
 //!
 //! Provider contract: `start` must be cancel-safe (dropping its future must not
 //! leak resources it has not yet reported), and when it fails after resources
 //! may exist it must return their identifier in [`ProviderError::remote_id`] so
 //! the manager can retain it and require an explicit, successful `stop`.
 
+use crate::cloudcraft_cloud_sunshine::{
+    probe_certificate, ProviderView, SunshineConfig, SunshineProvider,
+};
 use chrono::Utc;
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
@@ -51,6 +55,8 @@ impl SessionState {
                 | (Error, Starting)
                 | (Error, Stopping)
                 | (Error, Stopped)
+                // Only through `reconnect`, which requires a recorded remote session.
+                | (Error, Ready)
                 | (Starting, Ready)
                 | (Starting, Error)
                 | (Starting, Stopped)
@@ -92,9 +98,26 @@ pub trait CloudSessionProvider: Send + Sync {
         &'a self,
         remote_id: &'a str,
     ) -> BoxFuture<'a, Result<(), String>>;
+    /// `Some(problem)` when a ready session lost its local stream or remote side.
+    fn health(&self, _remote_id: &str) -> Option<String> {
+        None
+    }
+    fn supports_reconnect(&self) -> bool {
+        false
+    }
+    /// Re-attaches the local stream to a remote session that is still allocated.
+    fn reconnect<'a>(
+        &'a self,
+        _remote_id: &'a str,
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async {
+            Err("This provider cannot reconnect to a session.".to_string())
+        })
+    }
 }
 
-/// The only provider available until a real, verified one is integrated.
+/// Inert provider that never creates remote resources.
+#[cfg_attr(not(test), allow(dead_code))]
 pub struct UnconfiguredProvider;
 
 impl CloudSessionProvider for UnconfiguredProvider {
@@ -158,6 +181,7 @@ pub struct SessionSnapshot {
     pub can_start: bool,
     pub can_stop: bool,
     pub can_cancel: bool,
+    pub can_reconnect: bool,
     /// True when remote resources may still exist and need a successful stop.
     pub cleanup_required: bool,
 }
@@ -399,7 +423,11 @@ impl SessionManager {
             can_start,
             can_stop,
             can_cancel: inner.state == SessionState::Starting
+                && inner.control.is_some()
                 && !cancel_requested,
+            can_reconnect: inner.state == SessionState::Error
+                && inner.remote_id.is_some()
+                && self.provider.supports_reconnect(),
             cleanup_required: inner.remote_id.is_some()
                 && !matches!(
                     inner.state,
@@ -411,7 +439,62 @@ impl SessionManager {
     pub fn status(&self) -> SessionSnapshot {
         let mut inner = self.lock();
         self.refresh_availability(&mut inner);
+        if inner.state == SessionState::Ready {
+            let problem = inner
+                .remote_id
+                .as_deref()
+                .and_then(|id| self.provider.health(id));
+            if let Some(problem) = problem {
+                inner.force_state(SessionState::Error, problem);
+                self.persist(&inner);
+            }
+        }
         self.snapshot_of(&inner)
+    }
+
+    /// Re-attaches to a remote session that is still allocated (Error with a remote id).
+    pub async fn reconnect(&self) -> Result<SessionSnapshot, String> {
+        let remote_id = {
+            let inner = self.lock();
+            match (&inner.state, &inner.remote_id) {
+                (SessionState::Error, Some(id))
+                    if self.provider.supports_reconnect() =>
+                {
+                    id.clone()
+                }
+                _ => {
+                    return Err(
+                        "There is no interrupted session to reconnect to."
+                            .into(),
+                    )
+                }
+            }
+        };
+        let result = tokio::time::timeout(
+            self.timeouts.stop,
+            self.provider.reconnect(&remote_id),
+        )
+        .await
+        .unwrap_or_else(|_| Err("Reconnecting timed out.".into()));
+        let mut inner = self.lock();
+        if inner.state != SessionState::Error
+            || inner.remote_id.as_deref() != Some(remote_id.as_str())
+        {
+            return Ok(self.snapshot_of(&inner));
+        }
+        match result {
+            Ok(()) => inner.force_state(
+                SessionState::Ready,
+                "Reconnected to the cloud session.",
+            ),
+            Err(message) => {
+                inner.message = redact_secrets(&format!(
+                    "Reconnect failed: {message} Stop the session to release the remote computer."
+                ));
+            }
+        }
+        self.persist(&inner);
+        Ok(self.snapshot_of(&inner))
     }
 
     pub async fn start(
@@ -649,19 +732,137 @@ pub fn redact_secrets(text: &str) -> String {
 
 static MANAGER: once_cell::sync::OnceCell<SessionManager> =
     once_cell::sync::OnceCell::new();
+static SUNSHINE: once_cell::sync::OnceCell<Arc<SunshineProvider>> =
+    once_cell::sync::OnceCell::new();
+
+fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    app.path().app_data_dir().map_err(|error| {
+        format!("Could not locate the CloudCraft data directory: {error}")
+    })
+}
+
+fn sunshine(
+    app: &tauri::AppHandle,
+) -> Result<&'static Arc<SunshineProvider>, String> {
+    SUNSHINE.get_or_try_init(|| {
+        Ok(Arc::new(SunshineProvider::load(
+            data_dir(app)?.join("cloudcraft-cloud-host.json"),
+        )))
+    })
+}
 
 fn manager(app: &tauri::AppHandle) -> Result<&'static SessionManager, String> {
-    use tauri::Manager;
+    let provider = sunshine(app)?.clone();
     MANAGER.get_or_try_init(|| {
-        let directory = app.path().app_data_dir().map_err(|error| {
-            format!("Could not locate the CloudCraft data directory: {error}")
-        })?;
         Ok(SessionManager::new(
-            directory.join("cloudcraft-cloud-session.json"),
-            Arc::new(UnconfiguredProvider),
+            data_dir(app)?.join("cloudcraft-cloud-session.json"),
+            provider,
             Timeouts::default(),
         ))
     })
+}
+
+/// Kills the local stream client on launcher exit.
+pub fn shutdown() {
+    if let Some(provider) = SUNSHINE.get() {
+        provider.shutdown();
+    }
+}
+
+fn session_is_active(app: &tauri::AppHandle) -> Result<bool, String> {
+    let status = manager(app)?.status();
+    Ok(status.cleanup_required
+        || matches!(
+            status.state,
+            SessionState::Starting
+                | SessionState::Ready
+                | SessionState::Stopping
+        ))
+}
+
+#[tauri::command]
+pub fn cloudcraft_cloud_host_get(
+    app: tauri::AppHandle,
+) -> Result<ProviderView, String> {
+    Ok(sunshine(&app)?.view())
+}
+
+#[tauri::command]
+pub async fn cloudcraft_cloud_host_probe(
+    host: String,
+    api_port: u16,
+) -> Result<String, String> {
+    probe_certificate(&host, api_port).await
+}
+
+#[tauri::command]
+pub fn cloudcraft_cloud_host_save(
+    app: tauri::AppHandle,
+    config: SunshineConfig,
+) -> Result<ProviderView, String> {
+    if session_is_active(&app)? {
+        return Err(
+            "Stop the cloud session before changing the remote host.".into()
+        );
+    }
+    let provider = sunshine(&app)?;
+    provider.save_config(config)?;
+    Ok(provider.view())
+}
+
+#[tauri::command]
+pub fn cloudcraft_cloud_host_remove(
+    app: tauri::AppHandle,
+) -> Result<ProviderView, String> {
+    if session_is_active(&app)? {
+        return Err(
+            "Stop the cloud session before removing the remote host.".into()
+        );
+    }
+    let provider = sunshine(&app)?;
+    provider.clear_config()?;
+    Ok(provider.view())
+}
+
+#[tauri::command]
+pub async fn cloudcraft_cloud_host_unlock(
+    app: tauri::AppHandle,
+    password: String,
+) -> Result<ProviderView, String> {
+    let provider = sunshine(&app)?;
+    provider.unlock(password).await?;
+    Ok(provider.view())
+}
+
+#[tauri::command]
+pub fn cloudcraft_cloud_host_lock(
+    app: tauri::AppHandle,
+) -> Result<ProviderView, String> {
+    let provider = sunshine(&app)?;
+    provider.lock_credentials();
+    Ok(provider.view())
+}
+
+#[tauri::command]
+pub async fn cloudcraft_cloud_host_ping(
+    app: tauri::AppHandle,
+) -> Result<u64, String> {
+    sunshine(&app)?.ping().await
+}
+
+#[tauri::command]
+pub fn cloudcraft_cloud_host_logs(
+    app: tauri::AppHandle,
+) -> Result<Vec<String>, String> {
+    Ok(sunshine(&app)?.logs())
+}
+
+#[tauri::command]
+pub async fn cloudcraft_cloud_session_reconnect(
+    app: tauri::AppHandle,
+) -> Result<SessionSnapshot, String> {
+    manager(&app)?.reconnect().await
 }
 
 #[tauri::command]
@@ -713,6 +914,8 @@ mod tests {
         stop_fails: AtomicBool,
         start_calls: AtomicUsize,
         stop_calls: AtomicUsize,
+        stream_lost: AtomicBool,
+        reconnect_fails: AtomicBool,
     }
 
     impl FakeProvider {
@@ -721,6 +924,8 @@ mod tests {
                 configured: AtomicBool::new(true),
                 start_behavior: Mutex::new(behavior),
                 stop_fails: AtomicBool::new(false),
+                stream_lost: AtomicBool::new(false),
+                reconnect_fails: AtomicBool::new(false),
                 start_calls: AtomicUsize::new(0),
                 stop_calls: AtomicUsize::new(0),
             })
@@ -784,6 +989,67 @@ mod tests {
                 }
             })
         }
+
+        fn health(&self, _remote_id: &str) -> Option<String> {
+            self.stream_lost
+                .load(Ordering::SeqCst)
+                .then(|| "stream window closed".to_string())
+        }
+
+        fn supports_reconnect(&self) -> bool {
+            true
+        }
+
+        fn reconnect<'a>(
+            &'a self,
+            _remote_id: &'a str,
+        ) -> BoxFuture<'a, Result<(), String>> {
+            let fails = self.reconnect_fails.load(Ordering::SeqCst);
+            if !fails {
+                self.stream_lost.store(false, Ordering::SeqCst);
+            }
+            Box::pin(async move {
+                if fails {
+                    Err("host unreachable".into())
+                } else {
+                    Ok(())
+                }
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn lost_stream_moves_ready_to_error_and_reconnect_restores_it() {
+        let provider = FakeProvider::new(StartBehavior::Succeed);
+        let manager = manager_with(provider.clone(), temp_store());
+        manager.start(StartRequest::default()).await.unwrap();
+        assert_eq!(manager.status().state, SessionState::Ready);
+        assert!(!manager.status().can_reconnect);
+
+        provider.stream_lost.store(true, Ordering::SeqCst);
+        let lost = manager.status();
+        assert_eq!(lost.state, SessionState::Error);
+        assert!(lost.message.contains("stream window closed"));
+        assert!(lost.can_reconnect && lost.can_stop && lost.cleanup_required);
+
+        provider.reconnect_fails.store(true, Ordering::SeqCst);
+        let failed = manager.reconnect().await.unwrap();
+        assert_eq!(failed.state, SessionState::Error);
+        assert!(
+            failed.cleanup_required,
+            "failed reconnect keeps the remote id"
+        );
+
+        provider.reconnect_fails.store(false, Ordering::SeqCst);
+        let back = manager.reconnect().await.unwrap();
+        assert_eq!(back.state, SessionState::Ready);
+
+        let stopped = manager.stop().await;
+        assert_eq!(stopped.state, SessionState::Stopped);
+        assert!(
+            manager.reconnect().await.is_err(),
+            "nothing to reconnect after stop"
+        );
     }
 
     fn temp_store() -> PathBuf {

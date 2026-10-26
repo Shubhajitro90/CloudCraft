@@ -101,9 +101,9 @@ mod quilt {
     fn is_safe_version(version: &str) -> bool {
         !version.is_empty()
             && version.len() <= 64
-            && version
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | '_'))
+            && version.chars().all(|c| {
+                c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | '_')
+            })
     }
 
     /// Produces the Modrinth metadata layout theseus and the frontend expect: one
@@ -151,13 +151,25 @@ mod quilt {
         fn builds_modrinth_layout_and_rejects_unsafe_versions() {
             let manifest = build_manifest(
                 vec![
-                    QuiltLoader { version: "0.29.2".into() },
-                    QuiltLoader { version: "0.31.0-beta.4".into() },
-                    QuiltLoader { version: "../../evil".into() },
+                    QuiltLoader {
+                        version: "0.29.2".into(),
+                    },
+                    QuiltLoader {
+                        version: "0.31.0-beta.4".into(),
+                    },
+                    QuiltLoader {
+                        version: "../../evil".into(),
+                    },
                 ],
                 vec![
-                    QuiltGame { version: "1.21.8".into(), stable: true },
-                    QuiltGame { version: "x/y".into(), stable: true },
+                    QuiltGame {
+                        version: "1.21.8".into(),
+                        stable: true,
+                    },
+                    QuiltGame {
+                        version: "x/y".into(),
+                        stable: true,
+                    },
                 ],
             );
             let placeholder = &manifest.game_versions[0];

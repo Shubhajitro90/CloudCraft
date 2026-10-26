@@ -1,5 +1,6 @@
 //! API for interacting with Theseus
 pub mod cache;
+pub mod download;
 pub mod friends;
 pub mod handler;
 pub mod jre;
@@ -12,15 +13,15 @@ pub mod process;
 pub mod profile;
 pub mod settings;
 pub mod tags;
-pub mod download;
 
 pub mod data {
     pub use crate::state::{
         CacheBehaviour, CacheValueType, Credentials, Dependency, DirectoryInfo,
         Hooks, JavaVersion, LinkedData, MemorySettings, ModLoader,
-        ModrinthCredentials, Organization, ProcessMetadata, ProfileFile,
-        Project, ProjectType, SearchResult, SearchResults, Settings,
-        TeamMember, Theme, User, UserFriend, UserStatus, Version, WindowSize,
+        ModrinthCredentials, Organization, ProcessExit, ProcessMetadata,
+        ProfileFile, Project, ProjectType, SearchResult, SearchResults,
+        Settings, TeamMember, Theme, User, UserFriend, UserStatus, Version,
+        WindowSize,
     };
 }
 

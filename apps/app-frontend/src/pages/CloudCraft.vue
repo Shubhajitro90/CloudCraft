@@ -33,6 +33,9 @@ import { get as getSettings, set as setSettings } from '@/helpers/settings'
 import { cloudSessionProvider, cloudSessionStateLabel } from '@/helpers/cloudSession'
 import { cloudStorageProvider } from '@/helpers/cloudStorage'
 import LocalServerPanel from '@/components/cloudcraft/LocalServerPanel.vue'
+import CloudGamingPanel from '@/components/cloudcraft/CloudGamingPanel.vue'
+import InstanceExitReport from '@/components/cloudcraft/InstanceExitReport.vue'
+import InstanceSettingsEditor from '@/components/cloudcraft/InstanceSettingsEditor.vue'
 import {
   CompassIcon,
   DownloadIcon,
@@ -54,9 +57,8 @@ const saveName = ref('')
 const saveNotes = ref('')
 const instances = ref([])
 const instancesLoading = ref(true)
-const cloudInstancePath = ref('')
-const cloudSessionBusy = ref(false)
-const cloudSessionError = ref('')
+const editingPath = ref('')
+const exitReports = ref({})
 const cloudStorageStatus = ref({
   state: 'unconfigured',
   message: 'Checking cloud storage provider status…',
@@ -138,10 +140,6 @@ async function loadInstances() {
   try {
     const profiles = await list()
     instances.value = Array.isArray(profiles) ? profiles : Object.values(profiles || {})
-    if (!cloudInstancePath.value) {
-      cloudInstancePath.value =
-        instances.value.find((instance) => instance.install_stage === 'installed')?.path || ''
-    }
   } catch (error) {
     instanceError.value = String(error?.message || error)
   } finally {
@@ -269,7 +267,7 @@ async function removeInstance(instance) {
     if (result.deleted) installMessage.value = result.message
     else installError.value = result.message
     await loadInstances()
-    if (cloudInstancePath.value === instance.path) cloudInstancePath.value = ''
+    if (result.deleted) dismissExit(instance.path)
   } finally {
     deletingPath.value = ''
     confirmDeletePath.value = ''
@@ -325,54 +323,34 @@ async function loadCloudStorageStatus() {
   }
 }
 
-async function startCloudSession() {
-  const instance = instances.value.find((item) => item.path === cloudInstancePath.value)
-  if (
-    !instance ||
-    instance.install_stage !== 'installed' ||
-    !cloudSessionStatus.value.canStart ||
-    cloudSessionBusy.value
-  ) {
-    return
-  }
-
-  cloudSessionBusy.value = true
-  cloudSessionError.value = ''
-  const poll = setInterval(loadCloudSessionStatus, 1000)
+async function recordExit(path) {
   try {
-    cloudSessionStatus.value = await cloudSessionProvider.startSession(instance.game_version)
+    const exit = await invoke('cloudcraft_instance_last_exit', { profilePath: path })
+    if (!exit) return
+    const crash =
+      exit.success || exit.stopped_by_user
+        ? null
+        : await invoke('cloudcraft_instance_crash_report', {
+            profilePath: path,
+            since: exit.start_time,
+          }).catch(() => null)
+    exitReports.value = { ...exitReports.value, [path]: { exit, crash } }
   } catch (error) {
-    cloudSessionError.value = String(error?.message || error)
-    await loadCloudSessionStatus()
-  } finally {
-    clearInterval(poll)
-    cloudSessionBusy.value = false
+    console.error('Could not read the last exit for', path, error)
   }
 }
 
-async function stopCloudSession() {
-  if (!cloudSessionStatus.value.canStop || cloudSessionBusy.value) return
-
-  cloudSessionBusy.value = true
-  cloudSessionError.value = ''
-  try {
-    cloudSessionStatus.value = await cloudSessionProvider.stopSession()
-  } catch (error) {
-    cloudSessionError.value = String(error?.message || error)
-  } finally {
-    cloudSessionBusy.value = false
-  }
+function dismissExit(path) {
+  exitReports.value = Object.fromEntries(
+    Object.entries(exitReports.value).filter(([key]) => key !== path),
+  )
 }
 
-async function cancelCloudSessionStart() {
-  if (!cloudSessionStatus.value.canCancel) return
-
-  cloudSessionError.value = ''
-  try {
-    cloudSessionStatus.value = await cloudSessionProvider.cancelStart()
-  } catch (error) {
-    cloudSessionError.value = String(error?.message || error)
-  }
+async function onInstanceSaved(instance) {
+  editingPath.value = ''
+  installError.value = ''
+  await loadInstances()
+  installMessage.value = `Settings for ${instance.name || 'the instance'} were saved.`
 }
 
 async function loadLauncherSettings() {
@@ -437,8 +415,18 @@ onBeforeUnmount(() => {
 onMounted(async () => {
   unlistenProcess = await process_listener((event) => {
     runningPaths.value = applyProcessEvent(runningPaths.value, event)
+    if (event.event === 'launched') dismissExit(event.profile_path_id)
+    if (event.event === 'finished') recordExit(event.profile_path_id)
   })
-  loadInstances().then(refreshRunning)
+  loadInstances()
+    .then(refreshRunning)
+    .then(() =>
+      Promise.all(
+        instances.value
+          .filter((instance) => !runningPaths.value[instance.path])
+          .map((instance) => recordExit(instance.path)),
+      ),
+    )
   loadLauncherSettings()
   loadCloudSessionStatus()
   loadCloudStorageStatus()
@@ -655,7 +643,7 @@ function addSaveNote() {
           <span class="feature-icon">☁</span>
           <span class="feature-title">Cloud connections</span>
           <span class="feature-copy"
-            >Manage Kaggle compute and TeraBox storage connection setup.</span
+            >Stream Minecraft from a remote computer you control, and check storage status.</span
           >
           <span class="feature-link">Open cloud <span aria-hidden="true">→</span></span>
         </button>
@@ -680,8 +668,9 @@ function addSaveNote() {
         <div>
           <h3 class="m-0 text-base font-semibold">Transparent by design</h3>
           <p class="m-0 mt-1 text-sm text-secondary">
-            Remote cloud gaming and hosted multiplayer servers need a real provider integration.
-            Neither is presented as active until one is configured.
+            Cloud gaming streams from a remote computer you set up yourself, and the server tools
+            host on this device. Nothing is shown as connected or running until the backend confirms
+            it.
           </p>
         </div>
       </section>
@@ -697,67 +686,16 @@ function addSaveNote() {
         </div>
         <p class="mt-3 text-secondary" role="status">{{ cloudSessionStatus.message }}</p>
         <p v-if="cloudSessionStatus.cleanupRequired" class="inline-error" role="alert">
-          Remote resources may still exist for this session. Stop it to release them.
+          The remote computer may still be running Minecraft for this session. Stop it from the
+          Cloud tab.
         </p>
-        <p class="m-0 text-sm text-secondary">
-          Session state is tracked by the CloudCraft backend. Streaming a remote game requires a
-          real provider, and none is integrated yet.
-        </p>
-        <div class="cloud-controls">
-          <label for="cloud-instance">Instance for a future remote session</label>
-          <select id="cloud-instance" v-model="cloudInstancePath" :disabled="cloudSessionBusy">
-            <option value="">Select an installed instance</option>
-            <option
-              v-for="instance in instances.filter((item) => item.install_stage === 'installed')"
-              :key="instance.path"
-              :value="instance.path"
-            >
-              {{ instance.name || instance.path }} ·
-              {{ instance.game_version || 'version unknown' }}
-            </option>
-          </select>
-          <div class="flex flex-wrap gap-2">
-            <button
-              v-if="cloudSessionStatus.canStart"
-              class="primary-action"
-              type="button"
-              :disabled="cloudSessionBusy || !cloudInstancePath"
-              @click="startCloudSession"
-            >
-              {{ cloudSessionBusy ? 'Working…' : 'Start cloud session' }}
-            </button>
-            <button
-              v-if="cloudSessionStatus.canStop"
-              class="secondary-action"
-              type="button"
-              :disabled="cloudSessionBusy"
-              @click="stopCloudSession"
-            >
-              {{
-                cloudSessionStatus.cleanupRequired
-                  ? 'Release remote resources'
-                  : 'Stop cloud session'
-              }}
-            </button>
-            <button
-              v-if="cloudSessionStatus.state === 'starting'"
-              class="secondary-action"
-              type="button"
-              :disabled="!cloudSessionStatus.canCancel"
-              @click="cancelCloudSessionStart"
-            >
-              Cancel startup
-            </button>
-            <button
-              class="secondary-action"
-              type="button"
-              :disabled="cloudSessionBusy"
-              @click="loadCloudSessionStatus"
-            >
-              Refresh status
-            </button>
-          </div>
-          <p v-if="cloudSessionError" class="inline-error" role="alert">{{ cloudSessionError }}</p>
+        <div class="flex flex-wrap gap-2">
+          <button class="primary-action" type="button" @click="activeSection = 'cloud'">
+            {{ cloudSessionStatus.state === 'ready' ? 'Manage session' : 'Open cloud gaming' }}
+          </button>
+          <button class="secondary-action" type="button" @click="loadCloudSessionStatus">
+            Refresh status
+          </button>
         </div>
       </section>
     </template>
@@ -769,55 +707,17 @@ function addSaveNote() {
             <p class="eyebrow m-0 mb-2">CLOUD CONNECTIONS</p>
             <h2 class="m-0 text-2xl font-bold">Your cloud, one place</h2>
           </div>
-          <span class="status-pill muted">2 providers · setup required</span>
+          <span class="status-pill muted">
+            Cloud gaming · {{ cloudSessionStateLabel(cloudSessionStatus.state) }}
+          </span>
         </div>
         <p class="mt-3 text-secondary">
-          CloudCraft separates remote compute from file storage. Kaggle may provide notebook
-          compute; TeraBox is a storage service. Neither connection is active until a supported
-          authentication flow is configured and verified.
+          CloudCraft separates remote compute from file storage. Cloud gaming uses a remote computer
+          you control running the free Sunshine host; storage stays on this device until an
+          authorized storage provider is available.
         </p>
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-5">
-          <article class="provider-card">
-            <div class="provider-card-heading">
-              <span class="provider-logo kaggle-logo" aria-hidden="true">K</span>
-              <div class="min-w-0 flex-1">
-                <h3 class="m-0 text-lg font-semibold">Kaggle Compute</h3>
-                <p class="m-0 mt-1 text-sm text-secondary">Potential remote runtime</p>
-              </div>
-              <span class="connection-state">
-                <span class="connection-dot disconnected"></span>Not connected
-              </span>
-            </div>
-            <p class="mt-4 text-sm text-secondary">
-              Official Kaggle APIs support notebook-related operations and OAuth 2.0 for registered
-              third-party apps. That does not by itself provide a supported interactive
-              game-streaming service. CloudCraft has no registered OAuth client or verified remote
-              game runtime yet.
-            </p>
-            <ul class="provider-facts">
-              <li>
-                Authentication: requires a registered OAuth client or a securely handled API token.
-              </li>
-              <li>Compute: notebook runtime availability and limits are controlled by Kaggle.</li>
-              <li>Game streaming: not available in this build.</li>
-            </ul>
-            <a
-              class="secondary-action"
-              href="https://www.kaggle.com/docs/api"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Open Kaggle API documentation ↗
-            </a>
-            <a
-              class="provider-text-link"
-              href="https://www.kaggle.com/account"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Open Kaggle account settings ↗
-            </a>
-          </article>
+          <CloudGamingPanel @status="cloudSessionStatus = $event" />
           <article class="provider-card">
             <div class="provider-card-heading">
               <span class="provider-logo terabox-logo" aria-hidden="true">T</span>
@@ -830,14 +730,20 @@ function addSaveNote() {
               </span>
             </div>
             <p class="mt-4 text-sm text-secondary">
-              CloudCraft can only connect through a supported TeraBox integration. The official Open
-              Platform requires an application to be registered and authorized; this project does
-              not currently have the required app credentials or a verified upload/download client.
+              TeraBox&apos;s Open Platform only issues API access to vendor-approved applications.
+              Every token request is signed with an application secret and a private secret, which
+              cannot be kept safe inside a desktop app, so a supported integration also needs a
+              CloudCraft-operated token service. Neither exists yet.
             </p>
             <ul class="provider-facts">
-              <li>Authentication: requires an authorized TeraBox Open Platform app.</li>
+              <li>
+                Authentication: requires an approved TeraBox app and a server-side token broker.
+              </li>
               <li>Storage: account quota and file access cannot be verified until connected.</li>
-              <li>World sync: not available in this build; local backups remain on this device.</li>
+              <li>
+                World backups: fully available locally (Saves &amp; backups and the Servers tab),
+                with SHA-256 verification.
+              </li>
             </ul>
             <a
               class="secondary-action"
@@ -847,44 +753,38 @@ function addSaveNote() {
             >
               Open TeraBox integration docs ↗
             </a>
-            <a
-              class="provider-text-link"
-              href="https://teraabox.com/developers"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Open TeraBox developer portal ↗
-            </a>
           </article>
         </div>
       </section>
       <section class="notice-panel">
         <div class="notice-symbol">i</div>
         <div>
-          <h3 class="m-0 text-base font-semibold">Why there is no “Connect” switch yet</h3>
+          <h3 class="m-0 text-base font-semibold">Why there is no hosted cloud option</h3>
           <p class="m-0 mt-1 text-sm text-secondary">
-            A real login needs registered provider app credentials, a secure desktop OAuth callback,
-            protected token storage, and API verification. A green status would be misleading before
-            those steps work. CloudCraft never asks you to paste your provider password into this
-            page.
+            No free, no-card service currently allows streaming an interactive game. Google
+            Colab&apos;s free tier prohibits remote desktops, Kaggle limits notebooks to data
+            science, and always-free virtual machines require card verification and have no GPU.
+            CloudCraft therefore streams from a computer you own, using open-source Sunshine and
+            Moonlight.
           </p>
         </div>
       </section>
       <section class="content-panel">
-        <h3 class="m-0 text-lg font-semibold">What must be true before cloud play works</h3>
+        <h3 class="m-0 text-lg font-semibold">How a cloud session works</h3>
         <div class="definition-grid">
           <div>
             <span class="definition-tag">COMPUTE</span>
             <p class="text-sm text-secondary">
-              A supported remote runtime must start the graphical Minecraft client, expose a secure
-              low-latency video/input stream, and stop reliably when you exit.
+              Start configures the &quot;CloudCraft Minecraft&quot; app in Sunshine over a pinned
+              HTTPS connection, then opens Moonlight. Sunshine runs your launcher on the remote
+              computer, which renders the game and encodes it with its GPU.
             </p>
           </div>
           <div>
-            <span class="definition-tag">STORAGE</span>
+            <span class="definition-tag">STREAM</span>
             <p class="text-sm text-secondary">
-              A verified file API must upload and download complete world folders with integrity
-              checks, cancellation, conflict handling, and recovery.
+              Moonlight shows video and plays audio here and sends input back. If the window closes,
+              Reconnect reopens it; Stop closes the remote game and releases the session.
             </p>
           </div>
         </div>
@@ -1007,6 +907,14 @@ function addSaveNote() {
               >
                 {{ duplicatingPath === instance.path ? 'Duplicating…' : 'Duplicate' }}
               </button>
+              <button
+                class="secondary-action"
+                type="button"
+                :aria-expanded="editingPath === instance.path"
+                @click="editingPath = editingPath === instance.path ? '' : instance.path"
+              >
+                Settings
+              </button>
               <button class="secondary-action" type="button" @click="openInstance(instance)">
                 Details
               </button>
@@ -1026,6 +934,21 @@ function addSaveNote() {
                 }}
               </button>
             </div>
+            <InstanceExitReport
+              v-if="exitReports[instance.path] && !runningPaths[instance.path]"
+              :exit="exitReports[instance.path].exit"
+              :crash="exitReports[instance.path].crash"
+              @dismiss="dismissExit(instance.path)"
+              @repair="installInstance(instance, true)"
+              @logs="router.push(`/instance/${encodeURIComponent(instance.path)}/logs`)"
+            />
+            <InstanceSettingsEditor
+              v-if="editingPath === instance.path"
+              :instance="instance"
+              :running="!!runningPaths[instance.path]"
+              @close="editingPath = ''"
+              @saved="onInstanceSaved(instance)"
+            />
           </article>
         </div>
         <div v-else class="empty-state">

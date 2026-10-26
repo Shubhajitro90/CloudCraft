@@ -21,9 +21,7 @@ pub async fn finish_login(
 }
 
 #[tracing::instrument]
-pub async fn offline_auth(
-    name: &str
-) -> crate::Result<Credentials> {
+pub async fn offline_auth(name: &str) -> crate::Result<Credentials> {
     let state = State::get().await?;
     crate::state::offline_auth(name, &state.pool).await
 }

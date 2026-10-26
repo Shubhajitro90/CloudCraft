@@ -223,6 +223,10 @@ pub struct ProcessPayload {
     pub uuid: Uuid,
     pub event: ProcessPayloadType,
     pub message: String,
+    /// Set on `finished`: the OS exit code, or `None` when killed by a signal.
+    pub exit_code: Option<i32>,
+    /// Set on `finished`: true when the launcher's Stop ended the process.
+    pub stopped_by_user: bool,
 }
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "snake_case")]

@@ -12,6 +12,21 @@ use uuid::Uuid;
 
 pub struct ProcessManager {
     processes: DashMap<Uuid, Process>,
+    /// Last exit per profile path, kept for the lifetime of the launcher.
+    last_exits: DashMap<String, ProcessExit>,
+    stop_requested: DashMap<Uuid, ()>,
+}
+
+/// How a game process ended. `exit_code` is `None` when a signal ended it.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ProcessExit {
+    pub uuid: Uuid,
+    pub profile_path: String,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+    pub exit_code: Option<i32>,
+    pub success: bool,
+    pub stopped_by_user: bool,
 }
 
 impl Default for ProcessManager {
@@ -24,7 +39,13 @@ impl ProcessManager {
     pub fn new() -> Self {
         Self {
             processes: DashMap::new(),
+            last_exits: DashMap::new(),
+            stop_requested: DashMap::new(),
         }
+    }
+
+    pub fn last_exit(&self, profile_path: &str) -> Option<ProcessExit> {
+        self.last_exits.get(profile_path).map(|x| x.clone())
     }
 
     pub async fn insert_new_process(
@@ -59,6 +80,8 @@ impl ProcessManager {
             metadata.uuid,
             ProcessPayloadType::Launched,
             "Launched Minecraft",
+            None,
+            false,
         )
         .await?;
 
@@ -95,6 +118,7 @@ impl ProcessManager {
     }
 
     pub async fn kill(&self, id: Uuid) -> crate::Result<()> {
+        self.stop_requested.insert(id, ());
         if let Some(mut process) = self.processes.get_mut(&id) {
             process.child.kill().await?;
         }
@@ -102,8 +126,22 @@ impl ProcessManager {
         Ok(())
     }
 
-    fn remove(&self, id: Uuid) {
-        self.processes.remove(&id);
+    /// Removes the process and records how it ended. Returns whether Stop caused it.
+    fn remove(&self, id: Uuid, status: ExitStatus) -> bool {
+        let stopped_by_user = self.stop_requested.remove(&id).is_some();
+        if let Some((_, process)) = self.processes.remove(&id) {
+            let exit = ProcessExit {
+                uuid: id,
+                profile_path: process.metadata.profile_path.clone(),
+                start_time: process.metadata.start_time,
+                end_time: Utc::now(),
+                exit_code: status.code(),
+                success: status.success(),
+                stopped_by_user,
+            };
+            self.last_exits.insert(exit.profile_path.clone(), exit);
+        }
+        stopped_by_user
     }
 }
 
@@ -178,12 +216,19 @@ impl Process {
                 .await;
         }
 
-        state.process_manager.remove(uuid);
+        let stopped_by_user =
+            state.process_manager.remove(uuid, mc_exit_status);
+        let message = match mc_exit_status.code() {
+            Some(code) => format!("Exited process with code {code}"),
+            None => "Process was terminated".to_string(),
+        };
         emit_process(
             &profile_path,
             uuid,
             ProcessPayloadType::Finished,
-            "Exited process",
+            &message,
+            mc_exit_status.code(),
+            stopped_by_user,
         )
         .await?;
 

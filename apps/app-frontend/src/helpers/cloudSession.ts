@@ -18,14 +18,35 @@ export interface CloudSessionStatus {
   canStart: boolean
   canStop: boolean
   canCancel: boolean
+  canReconnect?: boolean
   cleanupRequired: boolean
 }
 
+export interface CloudHostConfig {
+  host: string
+  apiPort: number
+  username: string
+  certSha256: string
+  launchCommand: string
+  workingDir: string | null
+  moonlightPath: string
+  resolution: string | null
+  fps: number | null
+}
+
+export interface CloudHostView {
+  config: CloudHostConfig | null
+  unlocked: boolean
+  moonlightFound: boolean
+  streaming: boolean
+  moonlightCandidates: string[]
+}
+
 /**
- * Thin client for the Rust session manager. All state, validation, timeouts and
- * cleanup live in the backend; this module only forwards commands and returns the
- * backend's snapshot. Until a real provider is integrated the backend reports
- * `unavailable` and never creates remote resources.
+ * Thin client for the Rust session manager and the self-hosted Sunshine
+ * provider. All state, validation, timeouts, certificate pinning and cleanup
+ * live in the backend; the Sunshine password is sent once to unlock and is
+ * never stored or returned.
  */
 export const cloudSessionProvider = {
   getStatus: () => invoke<CloudSessionStatus>('cloudcraft_cloud_session_status'),
@@ -35,15 +56,43 @@ export const cloudSessionProvider = {
     }),
   cancelStart: () => invoke<CloudSessionStatus>('cloudcraft_cloud_session_cancel_start'),
   stopSession: () => invoke<CloudSessionStatus>('cloudcraft_cloud_session_stop'),
+  reconnect: () => invoke<CloudSessionStatus>('cloudcraft_cloud_session_reconnect'),
+}
+
+export const cloudHost = {
+  get: () => invoke<CloudHostView>('cloudcraft_cloud_host_get'),
+  probe: (host: string, apiPort: number) =>
+    invoke<string>('cloudcraft_cloud_host_probe', { host, apiPort }),
+  save: (config: CloudHostConfig) =>
+    invoke<CloudHostView>('cloudcraft_cloud_host_save', { config }),
+  remove: () => invoke<CloudHostView>('cloudcraft_cloud_host_remove'),
+  unlock: (password: string) => invoke<CloudHostView>('cloudcraft_cloud_host_unlock', { password }),
+  lock: () => invoke<CloudHostView>('cloudcraft_cloud_host_lock'),
+  ping: () => invoke<number>('cloudcraft_cloud_host_ping'),
+  logs: () => invoke<string[]>('cloudcraft_cloud_host_logs'),
 }
 
 export function cloudSessionStateLabel(state: CloudSessionState): string {
   switch (state) {
     case 'unavailable':
-      return 'Not configured'
+      return 'Not ready'
     case 'idle':
       return 'Ready to start'
+    case 'ready':
+      return 'Streaming'
     default:
       return state.charAt(0).toUpperCase() + state.slice(1)
   }
+}
+
+/** Formats a SHA-256 hex fingerprint as colon-separated byte pairs for comparison. */
+export function formatFingerprint(hex: string): string {
+  return (hex.match(/.{1,2}/g) || []).join(':').toUpperCase()
+}
+
+export function latencyQuality(ms: number | null): 'good' | 'fair' | 'poor' | 'unknown' {
+  if (ms === null || !Number.isFinite(ms)) return 'unknown'
+  if (ms <= 40) return 'good'
+  if (ms <= 100) return 'fair'
+  return 'poor'
 }

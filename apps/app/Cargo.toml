@@ -36,6 +36,9 @@ sha1_smol = { version = "1.0.0", features = ["std"] }
 zip = "0.6.5"
 reqwest = { version = "0.12.3", features = ["json", "stream", "deflate", "gzip", "brotli", "rustls-tls", "charset", "http2", "macos-system-configuration"], default-features = false }
 
+# Same major version reqwest uses, so `use_preconfigured_tls` accepts the pinned config.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+
 dirs = "5.0.1"
 
 url = "2.2"

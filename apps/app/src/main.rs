@@ -12,6 +12,8 @@ use theseus::prelude::*;
 
 mod api;
 mod cloudcraft_cloud_session;
+mod cloudcraft_cloud_sunshine;
+mod cloudcraft_launcher;
 mod cloudcraft_server;
 mod cloudcraft_server_backup;
 mod cloudcraft_server_delete;
@@ -675,6 +677,18 @@ fn main() {
             cloudcraft_cloud_session::cloudcraft_cloud_session_start,
             cloudcraft_cloud_session::cloudcraft_cloud_session_cancel_start,
             cloudcraft_cloud_session::cloudcraft_cloud_session_stop,
+            cloudcraft_cloud_session::cloudcraft_cloud_session_reconnect,
+            cloudcraft_cloud_session::cloudcraft_cloud_host_get,
+            cloudcraft_cloud_session::cloudcraft_cloud_host_probe,
+            cloudcraft_cloud_session::cloudcraft_cloud_host_save,
+            cloudcraft_cloud_session::cloudcraft_cloud_host_remove,
+            cloudcraft_cloud_session::cloudcraft_cloud_host_unlock,
+            cloudcraft_cloud_session::cloudcraft_cloud_host_lock,
+            cloudcraft_cloud_session::cloudcraft_cloud_host_ping,
+            cloudcraft_cloud_session::cloudcraft_cloud_host_logs,
+            cloudcraft_launcher::cloudcraft_instance_last_exit,
+            cloudcraft_launcher::cloudcraft_instance_crash_report,
+            cloudcraft_launcher::cloudcraft_instance_open_folder,
             cloudcraft_server::cloudcraft_server_configure,
             cloudcraft_server::cloudcraft_server_load,
             cloudcraft_server::cloudcraft_server_start,
@@ -713,6 +727,7 @@ fn main() {
             app.run(|app, event| {
                 if let tauri::RunEvent::ExitRequested { .. } = &event {
                     cloudcraft_server::shutdown();
+                    cloudcraft_cloud_session::shutdown();
                 }
 
                 #[cfg(target_os = "macos")]

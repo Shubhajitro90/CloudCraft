@@ -253,6 +253,8 @@ pub async fn emit_process(
     uuid: Uuid,
     event: ProcessPayloadType,
     message: &str,
+    exit_code: Option<i32>,
+    stopped_by_user: bool,
 ) -> crate::Result<()> {
     #[cfg(feature = "tauri")]
     {
@@ -266,6 +268,8 @@ pub async fn emit_process(
                     uuid,
                     event,
                     message: message.to_string(),
+                    exit_code,
+                    stopped_by_user,
                 },
             )
             .map_err(EventError::from)?;
