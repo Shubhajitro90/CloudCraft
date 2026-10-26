@@ -91,6 +91,9 @@ jobs:
             apps/app-frontend/src/helpers/cloudcraftDiagnostics.ts \
             apps/app-frontend/src/helpers/cloudcraftDiagnostics.test.mjs \
             apps/app-frontend/src/components/cloudcraft/CloudGamingPanel.vue \
+            apps/app-frontend/src/components/cloudcraft/CloudQuotaCard.vue \
+            apps/app-frontend/src/helpers/cloudQuota.ts \
+            apps/app-frontend/src/helpers/cloudQuota.test.mjs \
             apps/app-frontend/src/components/cloudcraft/InstanceExitReport.vue \
             apps/app-frontend/src/components/cloudcraft/InstanceSettingsEditor.vue \
             apps/app-frontend/src/helpers/cloudStorage.ts \
@@ -124,6 +127,8 @@ jobs:
             src/helpers/cloudSession.ts \
             src/helpers/cloudcraftDiagnostics.ts \
             src/components/cloudcraft/CloudGamingPanel.vue \
+            src/components/cloudcraft/CloudQuotaCard.vue \
+            src/helpers/cloudQuota.ts \
             src/components/cloudcraft/InstanceExitReport.vue \
             src/components/cloudcraft/InstanceSettingsEditor.vue \
             src/helpers/cloudStorage.ts \
@@ -151,6 +156,7 @@ jobs:
             apps/app-frontend/src/helpers/cloudcraftLauncher.test.mjs \
             apps/app-frontend/src/helpers/cloudcraftInstances.test.mjs \
             apps/app-frontend/src/helpers/cloudcraftDiagnostics.test.mjs \
+            apps/app-frontend/src/helpers/cloudQuota.test.mjs \
             .github/scripts/validate-installers.test.mjs
 
   rust:
@@ -161,10 +167,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      # Run #172 spent 19 minutes here on a slow mirror before succeeding. Bound the
+      # step and retry downloads so a stalled mirror fails visibly instead of hanging.
       - name: Install Tauri Linux dependencies
+        timeout-minutes: 25
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=60 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=60 install -y \
             build-essential curl wget file libssl-dev libxdo-dev \
             libayatana-appindicator3-dev librsvg2-dev patchelf \
             libwebkit2gtk-4.1-dev pkg-config
@@ -177,11 +186,25 @@ jobs:
       - name: Check Rust formatting
         run: cargo fmt --check --package theseus_gui
 
+      # Each test step fails if its filter matches no tests, so a rename cannot
+      # turn the step into a silent pass.
       - name: Run desktop crate tests
-        run: cargo test --package theseus_gui --no-default-features
+        run: |
+          set -o pipefail
+          cargo test --package theseus_gui --no-default-features 2>&1 | tee "$RUNNER_TEMP/desktop-tests.log"
+          grep -Eq 'test result: ok\. [1-9][0-9]* passed' "$RUNNER_TEMP/desktop-tests.log"
+
+      - name: Run cloud usage quota tests
+        run: |
+          set -o pipefail
+          cargo test --package theseus_gui --no-default-features cloudcraft_cloud_quota 2>&1 | tee "$RUNNER_TEMP/quota-tests.log"
+          grep -Eq 'test result: ok\. [1-9][0-9]* passed' "$RUNNER_TEMP/quota-tests.log"
 
       - name: Run verified installer downloader tests
-        run: cargo test --package theseus --lib api::download
+        run: |
+          set -o pipefail
+          cargo test --package theseus --lib api::download 2>&1 | tee "$RUNNER_TEMP/downloader-tests.log"
+          grep -Eq 'test result: ok\. [1-9][0-9]* passed' "$RUNNER_TEMP/downloader-tests.log"
 
   server-e2e:
     name: Real server end-to-end (network, Java 21)
@@ -192,9 +215,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Tauri Linux dependencies
+        timeout-minutes: 25
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev pkg-config
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=60 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=60 install -y libwebkit2gtk-4.1-dev pkg-config
 
       - name: Set up Java 21
         id: java
@@ -233,9 +257,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install build, display and audio dependencies
+        timeout-minutes: 25
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=60 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=60 install -y \
             build-essential libssl-dev libxdo-dev libayatana-appindicator3-dev \
             librsvg2-dev libwebkit2gtk-4.1-dev pkg-config \
             xvfb xauth x11-apps mesa-utils libegl1 libgl1-mesa-dri \
