@@ -15,7 +15,7 @@ on:
       - packages/ui/**
       - packages/utils/**
   push:
-    branches: [cloudcraft-implementation, 'v0/**']
+    branches: [cloudcraft-implementation, cloudcraft-development-completion, 'v0/**']
     paths:
       - .github/workflows/cloudcraft-frontend.yml
       - apps/app-frontend/**
