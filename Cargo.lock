@@ -8958,6 +8958,7 @@ dependencies = [
  "dunce",
  "flate2",
  "futures 0.3.31",
+ "hex",
  "indicatif",
  "lazy_static",
  "notify",

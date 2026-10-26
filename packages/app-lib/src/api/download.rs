@@ -52,9 +52,9 @@ pub fn validate_installer_name(name: &str) -> Result<(), String> {
         return Err("The installer file name is empty or too long.".into());
     }
     if name.starts_with('.')
-        || !name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
+        || !name.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+')
+        })
     {
         return Err(format!(
             "Refusing installer file name {name:?}: only letters, digits, '.', '-', '_' and '+' are allowed."
@@ -73,9 +73,9 @@ fn validate_tag(tag: &str) -> Result<(), String> {
         || tag.len() > 100
         || tag == "."
         || tag == ".."
-        || !tag
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
+        || !tag.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+')
+        })
     {
         return Err(format!("Refusing release tag {tag:?}."));
     }
@@ -88,7 +88,9 @@ pub fn parse_release_asset_url(url: &str) -> Result<ReleaseAsset, String> {
             .to_string()
     })?;
     if rest.contains(['?', '#', '\\', '%']) {
-        return Err("The release download URL contains unsupported characters.".into());
+        return Err(
+            "The release download URL contains unsupported characters.".into(),
+        );
     }
     let mut parts = rest.split('/');
     let (Some(tag), Some(file_name), None) =
@@ -259,7 +261,9 @@ pub async fn download_release_installer(
 ) -> Result<PathBuf, String> {
     let asset = parse_release_asset_url(download_url)?;
     if asset.file_name != local_filename {
-        return Err("The installer name does not match the download URL.".into());
+        return Err(
+            "The installer name does not match the download URL.".into()
+        );
     }
     let client = release_client()?;
     let checksums = fetch_checksums(&client, &asset.checksum_url()).await?;
@@ -290,10 +294,9 @@ async fn reveal(path: &Path, os_type: &str) -> Result<(), String> {
         c.arg(path.parent().unwrap_or(path));
         c
     };
-    command
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("Downloaded and verified, but could not open it: {e}"))
+    command.spawn().map(|_| ()).map_err(|e| {
+        format!("Downloaded and verified, but could not open it: {e}")
+    })
 }
 
 /// Entry point for the `get_artifact` command. Returns the verified installer path.
@@ -303,9 +306,11 @@ pub async fn init_download(
     os_type: &str,
     auto_update_supported: bool,
 ) -> crate::Result<PathBuf> {
-    let to_error = |message: String| crate::ErrorKind::OtherError(message).as_error();
-    let download_dir = dirs::download_dir()
-        .ok_or_else(|| to_error("Could not find the Downloads folder.".into()))?;
+    let to_error =
+        |message: String| crate::ErrorKind::OtherError(message).as_error();
+    let download_dir = dirs::download_dir().ok_or_else(|| {
+        to_error("Could not find the Downloads folder.".into())
+    })?;
     let path =
         download_release_installer(download_url, local_filename, &download_dir)
             .await
@@ -353,8 +358,18 @@ mod tests {
 
     #[test]
     fn installer_names_cannot_escape_the_folder() {
-        assert!(validate_installer_name("CloudCraft_0.9.204_x64-setup.exe").is_ok());
-        for bad in ["../a.exe", "a/b.exe", "a\\b.exe", ".hidden.exe", "a.exe ", "a", ""] {
+        assert!(
+            validate_installer_name("CloudCraft_0.9.204_x64-setup.exe").is_ok()
+        );
+        for bad in [
+            "../a.exe",
+            "a/b.exe",
+            "a\\b.exe",
+            ".hidden.exe",
+            "a.exe ",
+            "a",
+            "",
+        ] {
             assert!(validate_installer_name(bad).is_err(), "{bad}");
         }
     }
@@ -362,12 +377,22 @@ mod tests {
     #[test]
     fn parses_sha256sum_lines() {
         let hash = "a".repeat(64);
-        let text = format!("{hash}  CloudCraft.msi\r\n{}  *Other.dmg\n", "b".repeat(64));
-        assert_eq!(parse_checksum(&text, "CloudCraft.msi").unwrap(), [0xaa; 32]);
+        let text = format!(
+            "{hash}  CloudCraft.msi\r\n{}  *Other.dmg\n",
+            "b".repeat(64)
+        );
+        assert_eq!(
+            parse_checksum(&text, "CloudCraft.msi").unwrap(),
+            [0xaa; 32]
+        );
         assert_eq!(parse_checksum(&text, "Other.dmg").unwrap(), [0xbb; 32]);
         assert!(parse_checksum(&text, "Missing.exe").is_err());
-        assert!(parse_checksum("zz  CloudCraft.msi", "CloudCraft.msi").is_err());
-        assert!(parse_checksum("abcd  CloudCraft.msi", "CloudCraft.msi").is_err());
+        assert!(
+            parse_checksum("zz  CloudCraft.msi", "CloudCraft.msi").is_err()
+        );
+        assert!(
+            parse_checksum("abcd  CloudCraft.msi", "CloudCraft.msi").is_err()
+        );
     }
 
     async fn serve_once(body: Vec<u8>) -> String {
@@ -406,21 +431,30 @@ mod tests {
         let client = reqwest::Client::new();
         let dir = temp_dir();
 
-        let path = download_verified(&client, &url, expected, &dir, "CloudCraft.msi", 1024)
-            .await
-            .unwrap();
+        let path = download_verified(
+            &client,
+            &url,
+            expected,
+            &dir,
+            "CloudCraft.msi",
+            1024,
+        )
+        .await
+        .unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), body);
 
-        let err = download_verified(&client, &url, [0u8; 32], &dir, "Bad.msi", 1024)
-            .await
-            .unwrap_err();
+        let err =
+            download_verified(&client, &url, [0u8; 32], &dir, "Bad.msi", 1024)
+                .await
+                .unwrap_err();
         assert!(err.contains("Checksum mismatch"), "{err}");
         assert!(!dir.join("Bad.msi").exists());
         assert!(!dir.join("Bad.msi.part").exists());
 
-        let err = download_verified(&client, &url, expected, &dir, "Big.msi", 4)
-            .await
-            .unwrap_err();
+        let err =
+            download_verified(&client, &url, expected, &dir, "Big.msi", 4)
+                .await
+                .unwrap_err();
         assert!(err.contains("larger"), "{err}");
         assert!(!dir.join("Big.msi.part").exists());
         std::fs::remove_dir_all(dir).unwrap();
