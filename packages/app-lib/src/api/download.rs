@@ -387,9 +387,7 @@ mod tests {
         );
         assert_eq!(parse_checksum(&text, "Other.dmg").unwrap(), [0xbb; 32]);
         assert!(parse_checksum(&text, "Missing.exe").is_err());
-        assert!(
-            parse_checksum("zz  CloudCraft.msi", "CloudCraft.msi").is_err()
-        );
+        assert!(parse_checksum("zz  CloudCraft.msi", "CloudCraft.msi").is_err());
         assert!(
             parse_checksum("abcd  CloudCraft.msi", "CloudCraft.msi").is_err()
         );
@@ -458,6 +456,167 @@ mod tests {
         assert!(err.contains("larger"), "{err}");
         assert!(!dir.join("Big.msi.part").exists());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Serves `status` with `body`, declaring `declared_len` bytes. A declared
+    /// length larger than the body simulates a connection dropped mid-download.
+    async fn serve_raw(
+        status: &'static str,
+        body: Vec<u8>,
+        declared_len: usize,
+    ) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/file", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = socket.read(&mut buf).await;
+                    let header = format!(
+                        "HTTP/1.1 {status}\r\nContent-Length: {declared_len}\r\nConnection: close\r\n\r\n"
+                    );
+                    let _ = socket.write_all(header.as_bytes()).await;
+                    let _ = socket.write_all(&body).await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        url
+    }
+
+    fn no_leftovers(dir: &Path) {
+        let names: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.is_empty(), "left files behind: {names:?}");
+    }
+
+    #[tokio::test]
+    async fn missing_checksum_file_blocks_the_update() {
+        let url = serve_raw("404 Not Found", b"Not Found".to_vec(), 9).await;
+        let err = fetch_checksums(&reqwest::Client::new(), &url)
+            .await
+            .unwrap_err();
+        assert!(err.contains("has no SHA256SUMS.txt"), "{err}");
+        assert!(err.contains("404"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn oversized_or_binary_checksum_file_is_refused() {
+        let big = vec![b'a'; MAX_CHECKSUM_BYTES + 1];
+        let url = serve_raw("200 OK", big.clone(), big.len()).await;
+        let err = fetch_checksums(&reqwest::Client::new(), &url)
+            .await
+            .unwrap_err();
+        assert!(err.contains("unexpectedly large"), "{err}");
+
+        let binary = vec![0xff, 0xfe, 0x00, 0x80];
+        let url = serve_raw("200 OK", binary, 4).await;
+        let err = fetch_checksums(&reqwest::Client::new(), &url)
+            .await
+            .unwrap_err();
+        assert!(err.contains("not valid text"), "{err}");
+    }
+
+    #[test]
+    fn installer_absent_from_checksums_cannot_be_verified() {
+        let text =
+            format!("{}  CloudCraft_1.0.0_x64-setup.exe\n", "c".repeat(64));
+        let err = parse_checksum(&text, "CloudCraft_1.0.0_amd64.AppImage")
+            .unwrap_err();
+        assert!(err.contains("is not listed"), "{err}");
+        // A name that merely contains the wanted name must not match.
+        let text = format!("{}  evil-CloudCraft.msi\n", "d".repeat(64));
+        assert!(parse_checksum(&text, "CloudCraft.msi").is_err());
+    }
+
+    #[tokio::test]
+    async fn server_error_and_interrupted_download_leave_nothing_behind() {
+        let client = reqwest::Client::new();
+        let body = b"partial installer".to_vec();
+        let expected: [u8; 32] = Sha256::digest(&body).into();
+
+        let dir = temp_dir();
+        let url =
+            serve_raw("500 Internal Server Error", b"oops".to_vec(), 4).await;
+        let err =
+            download_verified(&client, &url, expected, &dir, "A.msi", 1 << 20)
+                .await
+                .unwrap_err();
+        assert!(err.contains("HTTP 500"), "{err}");
+        no_leftovers(&dir);
+
+        let url = serve_raw("200 OK", body.clone(), body.len() + 1000).await;
+        let err =
+            download_verified(&client, &url, expected, &dir, "B.msi", 1 << 20)
+                .await
+                .unwrap_err();
+        assert!(err.contains("interrupted"), "{err}");
+        no_leftovers(&dir);
+
+        let declared_too_big = serve_raw("200 OK", body.clone(), 1 << 21).await;
+        let err = download_verified(
+            &client,
+            &declared_too_big,
+            expected,
+            &dir,
+            "C.msi",
+            1 << 20,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("larger than the allowed size"), "{err}");
+        no_leftovers(&dir);
+
+        let err = download_verified(
+            &client,
+            "http://127.0.0.1:9/file",
+            expected,
+            &dir,
+            "D.msi",
+            1 << 20,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("Download failed"), "{err}");
+        no_leftovers(&dir);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn unsafe_destination_name_is_refused_before_any_write() {
+        let dir = temp_dir();
+        let err = download_verified(
+            &reqwest::Client::new(),
+            "http://127.0.0.1:9/file",
+            [0; 32],
+            &dir,
+            "../escape.msi",
+            10,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("Refusing"), "{err}");
+        no_leftovers(&dir);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn release_client_refuses_plain_http() {
+        let client = release_client().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let err = rt
+            .block_on(client.get("http://github.com/").send())
+            .unwrap_err();
+        assert!(
+            err.is_builder() || err.to_string().contains("scheme"),
+            "{err}"
+        );
     }
 
     #[tokio::test]

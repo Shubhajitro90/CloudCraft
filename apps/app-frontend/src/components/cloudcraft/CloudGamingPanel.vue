@@ -263,6 +263,10 @@ onBeforeUnmount(() => {
     </p>
 
     <p class="status-message" aria-live="polite">{{ status.message }}</p>
+    <p v-if="status.state === 'starting'" class="muted small">
+      Waiting until Moonlight is running and the remote computer reports the game session as
+      started. This can take up to 90 seconds while Minecraft launches on the host.
+    </p>
     <p v-if="status.cleanupRequired" class="error" role="alert">
       The remote computer may still be running Minecraft for this session. Stop it to close the
       remote app.

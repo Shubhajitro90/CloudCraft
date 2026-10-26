@@ -12,6 +12,17 @@
 //!   or returned to the frontend. Configuration on disk contains no secrets.
 //! - Moonlight is started directly (no shell) with fixed argument positions.
 //!
+//! Readiness and ownership:
+//! - A session is reported ready only when Moonlight is still running AND the
+//!   host's GameStream `serverinfo` endpoint reports an application session as
+//!   running (`SUNSHINE_SERVER_BUSY`). Sunshine starts the app only after a
+//!   client completed the authenticated launch handshake, so a process that
+//!   merely started, or a pairing that merely succeeded, is never "ready".
+//! - Moonlight runs in its own process group (Unix) so Stop terminates it and
+//!   any helper it spawned. On Linux it also receives SIGKILL if the launcher
+//!   dies. On every platform its PID and executable are recorded; a launcher
+//!   that restarts after a crash kills a still-running recorded Moonlight.
+//!
 //! Pairing Moonlight with the host is a one-time manual step performed in
 //! Moonlight and the Sunshine web UI; CloudCraft does not bypass it.
 
@@ -43,8 +54,60 @@ pub const DEFAULT_API_PORT: u16 = 47990;
 const CONFIG_VERSION: u32 = 1;
 const MAX_LOG_LINES: usize = 300;
 const API_TIMEOUT: Duration = Duration::from_secs(15);
-/// Moonlight exits within this window when the host is unreachable or unpaired.
-const STREAM_STARTUP_GRACE: Duration = Duration::from_secs(4);
+/// How long Moonlight may take to complete the launch handshake (includes the
+/// remote launcher starting, which Sunshine waits for before streaming).
+const STREAM_READY_TIMEOUT: Duration = Duration::from_secs(90);
+const STREAM_READY_POLL: Duration = Duration::from_secs(1);
+/// Grace period between SIGTERM and SIGKILL when stopping Moonlight.
+const STREAM_TERM_GRACE: Duration = Duration::from_secs(3);
+const PID_FILE_NAME: &str = "cloudcraft-moonlight.pid.json";
+
+/// Host session state reported by the GameStream `serverinfo` endpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostStatus {
+    pub busy: bool,
+    pub current_game: u64,
+    pub paired: Option<bool>,
+}
+
+fn xml_tag<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = xml.find(&open)? + open.len();
+    let end = xml[start..].find(&close)? + start;
+    Some(xml[start..end].trim())
+}
+
+/// Parses the XML `serverinfo` response. Requires an explicit `<state>`.
+pub fn parse_server_info(xml: &str) -> Result<HostStatus, String> {
+    if xml_tag(xml, "root").is_none() && !xml.contains("<root") {
+        return Err(
+            "The host's serverinfo response is not GameStream XML.".into()
+        );
+    }
+    let state = xml_tag(xml, "state").ok_or(
+        "The host's serverinfo response has no session state.".to_string(),
+    )?;
+    let busy = state.ends_with("_SERVER_BUSY");
+    if !busy && !state.ends_with("_SERVER_FREE") {
+        return Err(format!("Unknown host session state {state:?}."));
+    }
+    let current_game = xml_tag(xml, "currentgame")
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let paired = xml_tag(xml, "PairStatus").map(|v| v == "1");
+    Ok(HostStatus {
+        busy,
+        current_game,
+        paired,
+    })
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct PidRecord {
+    pid: u32,
+    exe: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -179,11 +242,34 @@ impl SunshineConfig {
         format!("https://{}:{}", self.url_host(), self.api_port)
     }
 
+    /// Sunshine's GameStream HTTP port is the web UI port minus one
+    /// (defaults 47989 and 47990).
+    pub fn gamestream_http_port(&self) -> u16 {
+        self.api_port.saturating_sub(1).max(1)
+    }
+
+    pub fn server_info_url(&self) -> String {
+        format!(
+            "http://{}:{}/serverinfo?uniqueid=0123456789ABCDEF",
+            self.url_host(),
+            self.gamestream_http_port()
+        )
+    }
+
+    /// Host argument for Moonlight; includes the port only when it is not the default.
+    fn moonlight_host(&self) -> String {
+        if self.api_port == DEFAULT_API_PORT {
+            self.host.trim().to_string()
+        } else {
+            format!("{}:{}", self.url_host(), self.gamestream_http_port())
+        }
+    }
+
     /// Arguments for `moonlight stream`. Fixed positions; never passed through a shell.
     pub fn moonlight_stream_args(&self) -> Vec<String> {
         let mut args = vec![
             "stream".to_string(),
-            self.host.trim().to_string(),
+            self.moonlight_host(),
             REMOTE_APP_NAME.to_string(),
             "--quit-after".to_string(),
         ];
@@ -217,6 +303,8 @@ impl SunshineConfig {
         })
     }
 }
+
+type SeenFingerprint = Arc<Mutex<Option<[u8; 32]>>>;
 
 /// Verifies the TLS handshake signature with the normal algorithms and accepts
 /// the end-entity certificate only when its SHA-256 matches the pin. With no pin
@@ -286,7 +374,7 @@ impl ServerCertVerifier for PinnedVerifier {
 
 fn pinned_client(
     expected: Option<[u8; 32]>,
-) -> Result<(reqwest::Client, Arc<Mutex<Option<[u8; 32]>>>), String> {
+) -> Result<(reqwest::Client, SeenFingerprint), String> {
     let crypto = Arc::new(rustls::crypto::ring::default_provider());
     let seen = Arc::new(Mutex::new(None));
     let verifier = PinnedVerifier {
@@ -480,6 +568,34 @@ impl SunshineApi {
     }
 }
 
+/// Reads the host's session state. Plain HTTP is what GameStream exposes before
+/// the paired HTTPS channel; no credentials are sent and the answer is used
+/// only as a readiness signal (Moonlight itself authenticates the stream).
+pub async fn fetch_host_status(url: &str) -> Result<HostStatus, String> {
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("Could not create the HTTP client: {e}"))?;
+    let response = client.get(url).send().await.map_err(|e| {
+        redact_secrets(&format!("Host status unavailable: {e}"))
+    })?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Host status request returned HTTP {}.",
+            response.status().as_u16()
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Could not read host status: {e}"))?;
+    if bytes.len() > 64 * 1024 {
+        return Err("The host status response is unexpectedly large.".into());
+    }
+    parse_server_info(&String::from_utf8_lossy(&bytes))
+}
+
 struct StreamProcess {
     child: Child,
     remote_id: String,
@@ -497,10 +613,12 @@ pub struct ProviderView {
 
 pub struct SunshineProvider {
     config_path: PathBuf,
+    pid_path: PathBuf,
     config: Mutex<Option<SunshineConfig>>,
     password: Mutex<Option<String>>,
     stream: Mutex<Option<StreamProcess>>,
     logs: Arc<Mutex<VecDeque<String>>>,
+    ready_timeout: Duration,
 }
 
 fn push_log(logs: &Arc<Mutex<VecDeque<String>>>, line: impl AsRef<str>) {
@@ -561,13 +679,89 @@ impl SunshineProvider {
             .filter(|saved| saved.version == CONFIG_VERSION)
             .map(|saved| saved.config)
             .filter(|config| config.validate().is_ok());
-        Self {
+        let pid_path = config_path.with_file_name(PID_FILE_NAME);
+        let provider = Self {
             config_path,
+            pid_path,
             config: Mutex::new(config),
             password: Mutex::new(None),
             stream: Mutex::new(None),
             logs: Arc::new(Mutex::new(VecDeque::new())),
+            ready_timeout: STREAM_READY_TIMEOUT,
+        };
+        provider.recover_orphaned_stream();
+        provider
+    }
+
+    /// Kills a Moonlight process recorded by a launcher that exited without
+    /// cleaning up. The PID is only trusted when the running process has the
+    /// recorded executable, so a reused PID is never killed.
+    fn recover_orphaned_stream(&self) {
+        let Some(record) = fs::read_to_string(&self.pid_path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<PidRecord>(&text).ok())
+        else {
+            let _ = fs::remove_file(&self.pid_path);
+            return;
+        };
+        let pid = sysinfo::Pid::from_u32(record.pid);
+        let mut system = sysinfo::System::new();
+        let recorded = fs::canonicalize(&record.exe)
+            .unwrap_or_else(|_| PathBuf::from(&record.exe));
+        let refreshed = system.refresh_process_specifics(
+            pid,
+            sysinfo::ProcessRefreshKind::new()
+                .with_exe(sysinfo::UpdateKind::Always),
+        );
+        let message = refreshed.then(|| {
+            match system.process(pid) {
+                Some(process)
+                    if process.exe().is_some_and(|exe| {
+                        fs::canonicalize(exe).unwrap_or_else(|_| exe.into())
+                            == recorded
+                    }) =>
+                {
+                    if process.kill() {
+                        format!(
+                            "Stopped Moonlight (pid {}) left running by a previous launcher session",
+                            record.pid
+                        )
+                    } else {
+                        format!(
+                            "Moonlight (pid {}) from a previous session could not be stopped; close it manually",
+                            record.pid
+                        )
+                    }
+                }
+                _ => format!(
+                    "Recorded pid {} is now a different program; it was left alone",
+                    record.pid
+                ),
+            }
+        });
+        if let Some(message) = message {
+            push_log(&self.logs, message);
         }
+        let _ = fs::remove_file(&self.pid_path);
+    }
+
+    fn write_pid_record(&self, pid: u32, exe: &str) {
+        let record = PidRecord {
+            pid,
+            exe: fs::canonicalize(exe)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| exe.to_string()),
+        };
+        if let Some(parent) = self.pid_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(text) = serde_json::to_string(&record) {
+            let _ = fs::write(&self.pid_path, text);
+        }
+    }
+
+    fn clear_pid_record(&self) {
+        let _ = fs::remove_file(&self.pid_path);
     }
 
     fn config(&self) -> Option<SunshineConfig> {
@@ -700,21 +894,42 @@ impl SunshineProvider {
                 config.moonlight_path
             ));
         }
-        let mut child = Command::new(&config.moonlight_path)
+        let mut command = Command::new(&config.moonlight_path);
+        command
             .args(config.moonlight_stream_args())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+        #[cfg(unix)]
+        command.process_group(0);
+        #[cfg(target_os = "linux")]
+        {
+            let parent = std::process::id() as libc::pid_t;
+            // SAFETY: only async-signal-safe libc calls run between fork and exec.
+            unsafe {
+                command.pre_exec(move || {
+                    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    // The launcher may have died before prctl took effect.
+                    if libc::getppid() != parent {
+                        libc::_exit(1);
+                    }
+                    Ok(())
+                });
+            }
+        }
+        let mut child = command
             .spawn()
             .map_err(|e| format!("Could not start Moonlight: {e}"))?;
+        let pid = child.id().unwrap_or(0);
+        if pid != 0 {
+            self.write_pid_record(pid, &config.moonlight_path);
+        }
         push_log(
             &self.logs,
-            format!(
-                "Started Moonlight (pid {}) for {}",
-                child.id().unwrap_or(0),
-                config.host
-            ),
+            format!("Started Moonlight (pid {pid}) for {}", config.host),
         );
         for reader in [
             child.stdout.take().map(|s| {
@@ -754,77 +969,175 @@ impl SunshineProvider {
         let mut stream = self.stream.lock().ok()?;
         let process = stream.as_mut()?;
         match process.child.try_wait() {
-            Ok(Some(status)) => Some(match status.code() {
-                Some(code) => format!("Moonlight exited with code {code}"),
-                None => "Moonlight was terminated by a signal".into(),
+            Ok(Some(status)) => Some({
+                self.clear_pid_record();
+                match status.code() {
+                    Some(code) => format!("Moonlight exited with code {code}"),
+                    None => "Moonlight was terminated by a signal".into(),
+                }
             }),
             Ok(None) => None,
             Err(error) => Some(format!("Moonlight state is unknown: {error}")),
         }
     }
 
+    /// Asks Moonlight's process group to quit, then force-kills it. Returns only
+    /// after the direct child has been reaped (or the wait timed out, which is logged).
     async fn kill_stream(&self) {
         let process = self.stream.lock().ok().and_then(|mut s| s.take());
         if let Some(mut process) = process {
+            #[cfg(unix)]
+            if let Some(pid) = process.child.id() {
+                signal_group(pid, libc::SIGTERM);
+                if tokio::time::timeout(STREAM_TERM_GRACE, process.child.wait())
+                    .await
+                    .is_err()
+                {
+                    signal_group(pid, libc::SIGKILL);
+                }
+                // Helpers that ignored SIGTERM must not outlive the session.
+                signal_group(pid, libc::SIGKILL);
+            }
             let _ = process.child.start_kill();
-            let _ = tokio::time::timeout(
+            let reaped = tokio::time::timeout(
                 Duration::from_secs(5),
                 process.child.wait(),
             )
-            .await;
+            .await
+            .is_ok();
+            self.clear_pid_record();
             push_log(
                 &self.logs,
-                format!("Moonlight stopped for {}", process.remote_id),
+                if reaped {
+                    format!("Moonlight stopped for {}", process.remote_id)
+                } else {
+                    format!(
+                        "Moonlight did not exit after being killed for {}",
+                        process.remote_id
+                    )
+                },
             );
         }
     }
 
-    /// Kills the local stream window on launcher exit. The remote app is released
-    /// on the next start through the recovered session's Stop.
+    /// Kills the local stream on launcher exit. The remote app is released on
+    /// the next start through the recovered session's Stop.
     pub fn shutdown(&self) {
         if let Ok(mut stream) = self.stream.lock() {
             if let Some(process) = stream.as_mut() {
+                #[cfg(unix)]
+                if let Some(pid) = process.child.id() {
+                    signal_group(pid, libc::SIGKILL);
+                }
                 let _ = process.child.start_kill();
             }
         }
+        self.clear_pid_record();
     }
 
-    async fn start_inner(&self) -> Result<RemoteSession, ProviderError> {
+    fn log_tail(&self, lines: usize) -> String {
+        let tail = self
+            .logs()
+            .into_iter()
+            .rev()
+            .take(lines)
+            .collect::<Vec<_>>();
+        tail.into_iter().rev().collect::<Vec<_>>().join(" | ")
+    }
+
+    /// Waits until Moonlight is alive and the host reports a running app session.
+    async fn wait_until_streaming(
+        &self,
+        config: &SunshineConfig,
+    ) -> Result<HostStatus, String> {
+        let url = config.server_info_url();
+        let deadline = Instant::now() + self.ready_timeout;
+        let mut last_problem;
+        loop {
+            if let Some(exit) = self.stream_exit() {
+                return Err(format!(
+                    "{exit} before the stream started. Check that Moonlight is paired with this host and the host is reachable. {}",
+                    self.log_tail(3)
+                ));
+            }
+            match fetch_host_status(&url).await {
+                Ok(status) if status.busy => return Ok(status),
+                Ok(_) => {
+                    last_problem =
+                        "the host reports no running app session".into()
+                }
+                Err(error) => last_problem = error,
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "Moonlight is running but the stream did not start within {} s ({last_problem}). {}",
+                    self.ready_timeout.as_secs(),
+                    self.log_tail(3)
+                ));
+            }
+            tokio::time::sleep(STREAM_READY_POLL).await;
+        }
+    }
+
+    async fn start_with(
+        &self,
+        config: &SunshineConfig,
+        api: &SunshineApi,
+    ) -> Result<RemoteSession, ProviderError> {
         let fail = |message: String| ProviderError {
             message,
             remote_id: None,
         };
-        let (config, api) = self.api().map_err(fail)?;
         if !Path::new(&config.moonlight_path).is_file() {
             return Err(fail(format!(
                 "Moonlight was not found at {}.",
                 config.moonlight_path
             )));
         }
-        api.upsert_app(&config).await.map_err(fail)?;
+        if let Ok(status) = fetch_host_status(&config.server_info_url()).await {
+            if status.busy {
+                return Err(fail(
+                    "The host is already streaming an app to another client. Stop that session on the host first.".into(),
+                ));
+            }
+        }
+        api.upsert_app(config).await.map_err(fail)?;
         push_log(
             &self.logs,
             format!("Configured \"{REMOTE_APP_NAME}\" on {}", config.host),
         );
         let remote_id =
             format!("{PROVIDER_ID}:{}:{REMOTE_APP_NAME}", config.host);
-        self.spawn_moonlight(&config, &remote_id).map_err(fail)?;
+        self.spawn_moonlight(config, &remote_id).map_err(fail)?;
 
-        tokio::time::sleep(STREAM_STARTUP_GRACE).await;
-        if let Some(exit) = self.stream_exit() {
-            let tail =
-                self.logs().into_iter().rev().take(3).collect::<Vec<_>>();
-            let detail = tail.into_iter().rev().collect::<Vec<_>>().join(" | ");
-            let released = api.close_app().await.is_ok();
-            self.kill_stream().await;
-            return Err(ProviderError {
-                message: format!(
-                    "{exit} before the stream started. Check that Moonlight is paired with this host and the host is reachable. {detail}"
-                ),
-                remote_id: if released { None } else { Some(remote_id) },
-            });
+        match self.wait_until_streaming(config).await {
+            Ok(status) => {
+                push_log(
+                    &self.logs,
+                    format!(
+                        "Host {} reports the app session running (app id {})",
+                        config.host, status.current_game
+                    ),
+                );
+                Ok(RemoteSession { remote_id })
+            }
+            Err(message) => {
+                let released = api.close_app().await.is_ok();
+                self.kill_stream().await;
+                Err(ProviderError {
+                    message,
+                    remote_id: if released { None } else { Some(remote_id) },
+                })
+            }
         }
-        Ok(RemoteSession { remote_id })
+    }
+
+    async fn start_inner(&self) -> Result<RemoteSession, ProviderError> {
+        let (config, api) = self.api().map_err(|message| ProviderError {
+            message,
+            remote_id: None,
+        })?;
+        self.start_with(&config, &api).await
     }
 }
 
@@ -904,12 +1217,27 @@ impl CloudSessionProvider for SunshineProvider {
             let config =
                 self.config().ok_or("The remote host is not configured.")?;
             self.spawn_moonlight(&config, remote_id)?;
-            tokio::time::sleep(STREAM_STARTUP_GRACE).await;
-            match self.stream_exit() {
-                Some(exit) => Err(format!("{exit} while reconnecting.")),
-                None => Ok(()),
+            match self.wait_until_streaming(&config).await {
+                Ok(_) => Ok(()),
+                Err(message) => {
+                    self.kill_stream().await;
+                    Err(format!("Reconnect failed: {message}"))
+                }
             }
         })
+    }
+}
+
+/// Signals the process group led by `pid` (Moonlight is spawned as a group leader).
+#[cfg(unix)]
+fn signal_group(pid: u32, signal: libc::c_int) {
+    if let Ok(pid) = libc::pid_t::try_from(pid) {
+        if pid > 1 {
+            // SAFETY: plain syscall; a negative pid addresses the group only.
+            unsafe {
+                libc::kill(-pid, signal);
+            }
+        }
     }
 }
 
@@ -1070,15 +1398,27 @@ mod tests {
         assert!(provider.password().is_none(), "new host requires unlock");
     }
 
-    /// Tiny HTTP/1.1 server emulating the documented Sunshine endpoints.
     async fn mock_sunshine(
         expected_auth: &'static str,
     ) -> (String, Arc<Mutex<Vec<String>>>) {
+        let (base, seen, _) = mock_sunshine_host(expected_auth, None).await;
+        (base, seen)
+    }
+
+    /// Tiny HTTP/1.1 server emulating the documented Sunshine endpoints plus
+    /// GameStream `serverinfo`. `busy_after` = number of `serverinfo` answers
+    /// that report FREE before BUSY (None = never busy). Closing the app frees it.
+    async fn mock_sunshine_host(
+        expected_auth: &'static str,
+        busy_after: Option<usize>,
+    ) -> (String, Arc<Mutex<Vec<String>>>, u16) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let seen = Arc::new(Mutex::new(Vec::new()));
         let apps =
             Arc::new(Mutex::new(vec![serde_json::json!({"name": "Desktop"})]));
+        let info_calls = Arc::new(Mutex::new((0usize, false)));
         let seen_clone = seen.clone();
         tokio::spawn(async move {
             loop {
@@ -1087,6 +1427,7 @@ mod tests {
                 };
                 let seen = seen_clone.clone();
                 let apps = apps.clone();
+                let info_calls = info_calls.clone();
                 tokio::spawn(async move {
                     let mut buf = vec![0u8; 65536];
                     let mut len = 0;
@@ -1127,7 +1468,21 @@ mod tests {
                                 seen.lock()
                                     .unwrap()
                                     .push(format!("{request_line} {body}"));
-                                let (status, payload) = if !authorized {
+                                let (status, payload) = if request_line
+                                    .starts_with("GET /serverinfo")
+                                {
+                                    let mut calls = info_calls.lock().unwrap();
+                                    calls.0 += 1;
+                                    if busy_after.is_some_and(|n| calls.0 > n) {
+                                        calls.1 = true;
+                                    }
+                                    let (state, game) = if calls.1 {
+                                        ("SUNSHINE_SERVER_BUSY", 7)
+                                    } else {
+                                        ("SUNSHINE_SERVER_FREE", 0)
+                                    };
+                                    ("200 OK", format!("<?xml version=\"1.0\" encoding=\"utf-8\"?><root status_code=\"200\"><hostname>mock</hostname><PairStatus>0</PairStatus><currentgame>{game}</currentgame><state>{state}</state></root>"))
+                                } else if !authorized {
                                     ("401 Unauthorized", "{}".to_string())
                                 } else if request_line
                                     .starts_with("GET /api/apps")
@@ -1136,6 +1491,10 @@ mod tests {
                                 } else if request_line
                                     .starts_with("POST /api/apps/close")
                                 {
+                                    let mut calls = info_calls.lock().unwrap();
+                                    calls.1 = false;
+                                    calls.0 = 0;
+                                    drop(calls);
                                     ("200 OK", r#"{"status":true}"#.to_string())
                                 } else if request_line
                                     .starts_with("POST /api/apps")
@@ -1166,7 +1525,7 @@ mod tests {
                 });
             }
         });
-        (base, seen)
+        (base, seen, port)
     }
 
     // "admin:pw" base64
@@ -1254,5 +1613,406 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(500)).await;
         let health = provider.health("sunshine:test").unwrap();
         assert!(health.contains("code 3"), "{health}");
+    }
+
+    #[test]
+    fn server_info_parsing_requires_explicit_state() {
+        let busy = parse_server_info("<root><PairStatus>1</PairStatus><currentgame>3</currentgame><state>SUNSHINE_SERVER_BUSY</state></root>").unwrap();
+        assert_eq!(
+            busy,
+            HostStatus {
+                busy: true,
+                current_game: 3,
+                paired: Some(true)
+            }
+        );
+        let free = parse_server_info(
+            "<root><currentgame>0</currentgame><state>SUNSHINE_SERVER_FREE</state></root>",
+        )
+        .unwrap();
+        assert!(!free.busy);
+        assert!(
+            parse_server_info("<root><currentgame>3</currentgame></root>")
+                .is_err()
+        );
+        assert!(parse_server_info("<root><state>WEIRD</state></root>").is_err());
+        assert!(parse_server_info("<html>login</html>").is_err());
+    }
+
+    #[test]
+    fn non_default_port_is_passed_to_moonlight_and_serverinfo() {
+        let mut c = config("/usr/bin/moonlight");
+        c.api_port = 50000;
+        assert_eq!(c.gamestream_http_port(), 49999);
+        assert_eq!(
+            c.moonlight_stream_args()[1],
+            "gaming-pc.tail1234.ts.net:49999"
+        );
+        assert!(c
+            .server_info_url()
+            .starts_with("http://gaming-pc.tail1234.ts.net:49999/serverinfo"));
+        assert_eq!(
+            config("/usr/bin/moonlight").moonlight_stream_args()[1],
+            "gaming-pc.tail1234.ts.net"
+        );
+    }
+
+    #[cfg(unix)]
+    fn fake_moonlight(dir: &Path, script: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let fake = dir.join("moonlight");
+        fs::write(&fake, format!("#!/bin/sh\n{script}\n")).unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        fake.to_string_lossy().into_owned()
+    }
+
+    #[cfg(unix)]
+    fn local_config(moonlight: &str, port: u16) -> SunshineConfig {
+        let mut c = config(moonlight);
+        c.host = "127.0.0.1".into();
+        c.api_port = port + 1;
+        c
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn ready_only_after_host_reports_running_session() {
+        let dir = temp_dir();
+        let moonlight = fake_moonlight(&dir, "sleep 30");
+        let (base, seen, port) = mock_sunshine_host(AUTH, Some(3)).await;
+        let api = SunshineApi::plain_for_tests(base, "admin", "pw");
+        let mut provider = SunshineProvider::load(dir.join("cloud.json"));
+        provider.ready_timeout = Duration::from_secs(20);
+        let c = local_config(&moonlight, port);
+        let session = provider.start_with(&c, &api).await.unwrap();
+        assert!(session.remote_id.starts_with("sunshine:127.0.0.1"));
+        assert!(provider.stream_running());
+        assert!(
+            provider.pid_path.exists(),
+            "pid recorded for crash recovery"
+        );
+        let info_requests = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|l| l.starts_with("GET /serverinfo"))
+            .count();
+        assert!(info_requests >= 4, "polled until busy: {info_requests}");
+        assert!(provider
+            .logs()
+            .iter()
+            .any(|l| l.contains("reports the app session running")));
+
+        provider.stop(&session.remote_id).await.unwrap_err(); // locked: no password
+        provider.kill_stream().await;
+        assert!(!provider.stream_running());
+        assert!(!provider.pid_path.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn running_process_without_host_session_times_out_and_cleans_up() {
+        let dir = temp_dir();
+        let moonlight = fake_moonlight(&dir, "sleep 30");
+        let (base, seen, port) = mock_sunshine_host(AUTH, None).await;
+        let api = SunshineApi::plain_for_tests(base, "admin", "pw");
+        let mut provider = SunshineProvider::load(dir.join("cloud.json"));
+        provider.ready_timeout = Duration::from_secs(2);
+        let error = provider
+            .start_with(&local_config(&moonlight, port), &api)
+            .await
+            .unwrap_err();
+        assert!(
+            error.message.contains("did not start within"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("no running app session"),
+            "{}",
+            error.message
+        );
+        assert!(error.remote_id.is_none(), "remote app was released");
+        assert!(!provider.stream_running(), "Moonlight was killed");
+        assert!(seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l.starts_with("POST /api/apps/close")));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn moonlight_exit_before_stream_is_reported_with_its_output() {
+        let dir = temp_dir();
+        let moonlight =
+            fake_moonlight(&dir, "echo 'Computer is not paired' 1>&2\nexit 2");
+        let (base, _, port) = mock_sunshine_host(AUTH, None).await;
+        let api = SunshineApi::plain_for_tests(base, "admin", "pw");
+        let provider = SunshineProvider::load(dir.join("cloud.json"));
+        let error = provider
+            .start_with(&local_config(&moonlight, port), &api)
+            .await
+            .unwrap_err();
+        assert!(
+            error.message.contains("exited with code 2"),
+            "{}",
+            error.message
+        );
+        assert!(error.message.contains("not paired"), "{}", error.message);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn busy_host_is_refused_before_launching() {
+        let dir = temp_dir();
+        let moonlight = fake_moonlight(&dir, "sleep 30");
+        let (base, seen, port) = mock_sunshine_host(AUTH, Some(0)).await;
+        let api = SunshineApi::plain_for_tests(base, "admin", "pw");
+        let provider = SunshineProvider::load(dir.join("cloud.json"));
+        let error = provider
+            .start_with(&local_config(&moonlight, port), &api)
+            .await
+            .unwrap_err();
+        assert!(
+            error.message.contains("already streaming"),
+            "{}",
+            error.message
+        );
+        assert!(!provider.stream_running());
+        assert!(!seen.lock().unwrap().iter().any(|l| l.starts_with("POST")));
+    }
+
+    #[cfg(unix)]
+    fn process_alive(pid: i32) -> bool {
+        // A zombie is dead for our purposes.
+        match fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Ok(stat) => !stat
+                .rsplit_once(')')
+                .is_some_and(|(_, rest)| rest.trim_start().starts_with('Z')),
+            Err(_) => unsafe { libc::kill(pid, 0) == 0 },
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stop_kills_helpers_spawned_by_moonlight() {
+        let dir = temp_dir();
+        let child_pid = dir.join("helper.pid");
+        let moonlight = fake_moonlight(
+            &dir,
+            &format!(
+                "trap '' TERM\nsleep 60 &\necho $! > {}\nwait",
+                child_pid.display()
+            ),
+        );
+        let provider = SunshineProvider::load(dir.join("cloud.json"));
+        provider
+            .spawn_moonlight(&config(&moonlight), "sunshine:test")
+            .unwrap();
+        let mut helper = None;
+        for _ in 0..50 {
+            if let Some(pid) = fs::read_to_string(&child_pid)
+                .ok()
+                .and_then(|t| t.trim().parse::<i32>().ok())
+            {
+                helper = Some(pid);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let helper = helper.expect("helper started");
+        assert!(process_alive(helper));
+        provider.kill_stream().await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!process_alive(helper), "helper {helper} outlived Stop");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn orphaned_moonlight_from_crashed_launcher_is_killed_on_load() {
+        let dir = temp_dir();
+        // A shell that stays the process image (`; true` prevents exec of sleep);
+        // multicall coreutils builds make a copied `sleep` re-exec another file.
+        let exe = fs::canonicalize("/bin/sh").unwrap();
+        let mut orphan = std::process::Command::new(&exe)
+            .args(["-c", "sleep 60; true"])
+            .spawn()
+            .unwrap();
+        let pid = orphan.id();
+        std::thread::sleep(Duration::from_millis(200));
+        let config_path = dir.join("cloud.json");
+        fs::write(
+            config_path.with_file_name(PID_FILE_NAME),
+            serde_json::to_string(&PidRecord {
+                pid,
+                exe: exe.to_string_lossy().into_owned(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let provider = SunshineProvider::load(config_path.clone());
+        let status = orphan.wait().unwrap();
+        assert!(!status.success(), "orphan was killed");
+        assert!(provider.logs().iter().any(|l| l.contains("left running")));
+        assert!(!config_path.with_file_name(PID_FILE_NAME).exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reused_pid_with_different_program_is_left_alone() {
+        let dir = temp_dir();
+        let mut unrelated = std::process::Command::new("/bin/sleep")
+            .arg("60")
+            .spawn()
+            .unwrap();
+        let config_path = dir.join("cloud.json");
+        fs::write(
+            config_path.with_file_name(PID_FILE_NAME),
+            serde_json::to_string(&PidRecord {
+                pid: unrelated.id(),
+                exe: "/opt/not-moonlight".into(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let provider = SunshineProvider::load(config_path);
+        assert!(
+            unrelated.try_wait().unwrap().is_none(),
+            "unrelated process kept"
+        );
+        assert!(provider.logs().iter().any(|l| l.contains("left alone")));
+        let _ = unrelated.kill();
+        let _ = unrelated.wait();
+    }
+
+    /// Opt-in test against a REAL Sunshine host with an already-paired local
+    /// Moonlight. Never runs in ordinary CI; it panics when not configured so
+    /// that an explicit run cannot silently pass.
+    ///
+    /// ```text
+    /// CLOUDCRAFT_SUNSHINE_HOST=192.168.1.20 \
+    /// CLOUDCRAFT_SUNSHINE_USER=admin CLOUDCRAFT_SUNSHINE_PASSWORD=... \
+    /// CLOUDCRAFT_SUNSHINE_CERT_SHA256=<64 hex> \
+    /// CLOUDCRAFT_MOONLIGHT=/usr/bin/moonlight \
+    /// [CLOUDCRAFT_SUNSHINE_PORT=47990] [CLOUDCRAFT_SUNSHINE_LAUNCH_COMMAND=...] \
+    /// [CLOUDCRAFT_SUNSHINE_HOLD_SECS=10] \
+    /// cargo test -p theseus_gui --no-default-features real_sunshine -- --ignored --nocapture
+    /// ```
+    #[tokio::test]
+    #[ignore = "needs a real Sunshine host and a paired Moonlight; see doc comment"]
+    async fn real_sunshine_moonlight_stream_lifecycle() {
+        let env = |key: &str| {
+            std::env::var(key)
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| {
+                    panic!("{key} must be set for the real Sunshine test")
+                })
+        };
+        let host = env("CLOUDCRAFT_SUNSHINE_HOST");
+        let password = env("CLOUDCRAFT_SUNSHINE_PASSWORD");
+        let api_port = std::env::var("CLOUDCRAFT_SUNSHINE_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(DEFAULT_API_PORT);
+        let hold = std::env::var("CLOUDCRAFT_SUNSHINE_HOLD_SECS")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(10u64);
+        let real = SunshineConfig {
+            host: host.clone(),
+            api_port,
+            username: env("CLOUDCRAFT_SUNSHINE_USER"),
+            cert_sha256: env("CLOUDCRAFT_SUNSHINE_CERT_SHA256"),
+            launch_command: std::env::var("CLOUDCRAFT_SUNSHINE_LAUNCH_COMMAND")
+                .unwrap_or_else(|_| "sleep 600".into()),
+            working_dir: None,
+            moonlight_path: env("CLOUDCRAFT_MOONLIGHT"),
+            resolution: Some("1280x720".into()),
+            fps: Some(30),
+        };
+        let dir = temp_dir();
+
+        // Invalid configuration and missing dependency are refused up front.
+        let mut invalid = real.clone();
+        invalid.moonlight_path = "moonlight".into();
+        assert!(invalid.validate().is_err());
+        let missing = SunshineProvider::load(dir.join("missing.json"));
+        let mut absent = real.clone();
+        absent.moonlight_path =
+            dir.join("no-moonlight").to_string_lossy().into();
+        missing.save_config(absent).unwrap();
+        let reason = missing.unavailable_reason().unwrap();
+        assert!(reason.contains("not found"), "{reason}");
+
+        // The pinned certificate is the one the host presents.
+        let probed = probe_certificate(&host, api_port).await.unwrap();
+        assert_eq!(
+            probed,
+            format_fingerprint(&parse_fingerprint(&real.cert_sha256).unwrap()),
+            "host certificate differs from CLOUDCRAFT_SUNSHINE_CERT_SHA256"
+        );
+
+        let provider = SunshineProvider::load(dir.join("cloud.json"));
+        provider.save_config(real.clone()).unwrap();
+        let wrong = provider.unlock("definitely-wrong-password".into()).await;
+        assert!(wrong.unwrap_err().contains("rejected"));
+        provider.unlock(password).await.unwrap();
+        assert!(provider.unavailable_reason().is_none());
+        let before = fetch_host_status(&real.server_info_url()).await.unwrap();
+        assert!(!before.busy, "host must be idle before the test");
+
+        let started = Instant::now();
+        let session = provider
+            .start(&StartRequest { game_version: None })
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "stream did not start: {}\nlogs:\n{}",
+                    e.message,
+                    provider.logs().join("\n")
+                )
+            });
+        println!("stream ready after {:?}", started.elapsed());
+        let during = fetch_host_status(&real.server_info_url()).await.unwrap();
+        assert!(during.busy, "host reports the session running");
+        let pid = provider
+            .stream
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|s| s.child.id())
+            .unwrap();
+        for _ in 0..hold {
+            assert!(
+                provider.health(&session.remote_id).is_none(),
+                "{:?}",
+                provider.logs()
+            );
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+
+        provider.stop(&session.remote_id).await.unwrap();
+        assert!(!provider.stream_running());
+        #[cfg(unix)]
+        assert!(
+            !process_alive(pid as i32),
+            "Moonlight pid {pid} survived Stop"
+        );
+        let mut freed = false;
+        for _ in 0..15 {
+            if !fetch_host_status(&real.server_info_url())
+                .await
+                .unwrap()
+                .busy
+            {
+                freed = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        assert!(freed, "host still busy 15 s after Stop");
+        println!("--- provider log ---\n{}", provider.logs().join("\n"));
     }
 }

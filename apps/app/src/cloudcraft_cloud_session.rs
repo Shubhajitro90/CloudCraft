@@ -763,6 +763,14 @@ fn manager(app: &tauri::AppHandle) -> Result<&'static SessionManager, String> {
     })
 }
 
+/// Loads the provider at launcher start so a Moonlight process orphaned by a
+/// previous crash is stopped immediately, and restores the session record.
+pub fn init(app: &tauri::AppHandle) {
+    if let Err(error) = manager(app) {
+        tracing::warn!("CloudCraft cloud session init failed: {error}");
+    }
+}
+
 /// Kills the local stream client on launcher exit.
 pub fn shutdown() {
     if let Some(provider) = SUNSHINE.get() {

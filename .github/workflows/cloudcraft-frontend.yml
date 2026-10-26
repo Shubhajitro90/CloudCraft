@@ -2,9 +2,10 @@ name: CloudCraft validation
 
 on:
   pull_request:
-    branches: [beta, cloudcraft-implementation, 'v0/**']
+    branches: [beta, cloudcraft-implementation, cloudcraft-development-completion, 'v0/**']
     paths:
       - .github/workflows/cloudcraft-frontend.yml
+      - .github/scripts/**
       - apps/app-frontend/**
       - apps/app/**
       - Cargo.toml
@@ -15,9 +16,10 @@ on:
       - packages/ui/**
       - packages/utils/**
   push:
-    branches: [cloudcraft-implementation, 'v0/**']
+    branches: [cloudcraft-implementation, cloudcraft-development-completion, 'v0/**']
     paths:
       - .github/workflows/cloudcraft-frontend.yml
+      - .github/scripts/**
       - apps/app-frontend/**
       - apps/app/**
       - Cargo.toml
@@ -148,7 +150,8 @@ jobs:
             apps/app-frontend/src/helpers/cloudcraftOperations.test.mjs \
             apps/app-frontend/src/helpers/cloudcraftLauncher.test.mjs \
             apps/app-frontend/src/helpers/cloudcraftInstances.test.mjs \
-            apps/app-frontend/src/helpers/cloudcraftDiagnostics.test.mjs
+            apps/app-frontend/src/helpers/cloudcraftDiagnostics.test.mjs \
+            .github/scripts/validate-installers.test.mjs
 
   rust:
     name: Rust formatting and local-backup safety tests
@@ -177,6 +180,9 @@ jobs:
       - name: Run desktop crate tests
         run: cargo test --package theseus_gui --no-default-features
 
+      - name: Run verified installer downloader tests
+        run: cargo test --package theseus --lib api::download
+
   server-e2e:
     name: Real server end-to-end (network, Java 21)
     runs-on: ubuntu-22.04
@@ -203,8 +209,9 @@ jobs:
       # Downloads Paper from the official PaperMC API, verifies its SHA-256, starts the
       # real server, pings it, restarts, stops, and checks world persistence and
       # export/import. These tests are #[ignore]d in the unit job because they need
-      # network access and a Java runtime.
+      # network access and a Java runtime. The real Sunshine/Moonlight test is
+      # excluded: it needs a personal streaming host and is run only by hand.
       - name: Run ignored real-network tests
         env:
           CLOUDCRAFT_REAL_JAVA: ${{ steps.java.outputs.path }}/bin/java
-        run: cargo test --package theseus_gui --no-default-features -- --ignored --nocapture
+        run: cargo test --package theseus_gui --no-default-features -- --ignored --nocapture --skip real_sunshine

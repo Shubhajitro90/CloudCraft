@@ -78,6 +78,8 @@ export function cloudSessionStateLabel(state: CloudSessionState): string {
       return 'Not ready'
     case 'idle':
       return 'Ready to start'
+    case 'starting':
+      return 'Connecting'
     case 'ready':
       return 'Streaming'
     default:

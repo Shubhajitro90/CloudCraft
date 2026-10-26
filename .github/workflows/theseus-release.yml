@@ -1,15 +1,22 @@
 name: 'CloudCraft desktop build'
+# Deliberately no pull_request trigger: this workflow can read signing secrets,
+# so it only runs for pushes by collaborators, tags, and manual dispatch.
+# Untrusted pull requests are validated by cloudcraft-frontend.yml, which has
+# no secrets and read-only permissions.
 on:
   push:
     branches:
       - feature*
       - cloudcraft-implementation
+      - cloudcraft-development-completion
       - 'v0/**'
+    # Path filters are not applied to tag pushes, so every v* tag builds.
     tags:
       - 'build*'
       - 'v*'
     paths:
       - .github/workflows/theseus-release.yml
+      - .github/scripts/**
       - 'apps/app/**'
       - 'apps/app-frontend/**'
       - 'packages/app-lib/**'
@@ -27,7 +34,27 @@ concurrency:
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
+  # Fails fast, before any build minutes are spent, when release metadata is wrong.
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read application version
+        id: version
+        run: |
+          version=$(node -p 'require("./apps/app/tauri.conf.json").version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "CloudCraft version: $version"
+      - name: Validator self-test
+        run: node --test .github/scripts/validate-installers.test.mjs
+      - name: Tag must match the application version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node .github/scripts/validate-installers.mjs tag --version "${{ steps.version.outputs.version }}" --tag "${GITHUB_REF_NAME}"
+
   build:
+    needs: metadata
     strategy:
       fail-fast: false
       matrix:
@@ -121,7 +148,7 @@ jobs:
       # secret is absent the build is produced unsigned and reported as unsigned.
       # See docs/RELEASING.md for the secret names and how to create them.
       - name: Configure macOS signing (only when secrets exist)
-        if: startsWith(matrix.platform, 'macos') && env.HAS_APPLE_CERTIFICATE == 'true'
+        if: github.event_name != 'pull_request' && startsWith(matrix.platform, 'macos') && env.HAS_APPLE_CERTIFICATE == 'true'
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -138,7 +165,7 @@ jobs:
           done
 
       - name: Configure Windows signing (only when secrets exist)
-        if: startsWith(matrix.platform, 'windows') && env.HAS_WINDOWS_CERTIFICATE == 'true'
+        if: github.event_name != 'pull_request' && startsWith(matrix.platform, 'windows') && env.HAS_WINDOWS_CERTIFICATE == 'true'
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -182,18 +209,17 @@ jobs:
           mkdir -p cloudcraft-dist
           find target -path '*/release/bundle/*' -type f \
             \( -name '*.dmg' -o -name '*.msi' -o -name '*-setup.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
-            -print | while read -r f; do
-            [ -s "$f" ] || { echo "::error::empty installer $f"; exit 1; }
-            cp "$f" cloudcraft-dist/
-          done
-          count=$(ls cloudcraft-dist | wc -l)
-          [ "$count" -gt 0 ] || { echo "::error::no installers were produced"; exit 1; }
-          cd cloudcraft-dist
-          if command -v sha256sum >/dev/null; then sha256sum -- * > "SHA256SUMS-${{ matrix.platform }}.txt"; else shasum -a 256 -- * > "SHA256SUMS-${{ matrix.platform }}.txt"; fi
+            -exec cp {} cloudcraft-dist/ \;
+          # Checks file-format signatures, size bounds, safe names and the version
+          # in every name, then writes this platform's checksums.
+          node .github/scripts/validate-installers.mjs collect \
+            --dir cloudcraft-dist \
+            --version "${{ needs.metadata.outputs.version }}" \
+            --sums "SHA256SUMS-${{ matrix.platform }}.txt"
           {
             echo "### Installers (${{ matrix.platform }})"
             echo '```'
-            cat "SHA256SUMS-${{ matrix.platform }}.txt"
+            cat "cloudcraft-dist/SHA256SUMS-${{ matrix.platform }}.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -250,12 +276,17 @@ jobs:
   # SHA256SUMS.txt. A maintainer reviews and publishes the draft manually; the
   # in-app updater refuses any installer that is not listed in SHA256SUMS.txt.
   draft-release:
-    needs: build
+    needs: [metadata, build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Keyless Sigstore build-provenance attestation (no stored signing key).
+      id-token: write
+      attestations: write
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download checksummed installers
         uses: actions/download-artifact@v4
         with:
@@ -263,16 +294,36 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Combine and verify checksums
+      - name: Combine and verify the complete release
         shell: bash
         run: |
           set -euo pipefail
-          cd dist
-          cat SHA256SUMS-*.txt | sort -k2 > SHA256SUMS.txt
-          rm SHA256SUMS-*.txt
-          sha256sum --check --strict SHA256SUMS.txt
-          dupes=$(awk '{print $2}' SHA256SUMS.txt | sort | uniq -d)
-          [ -z "$dupes" ] || { echo "::error::duplicate installer names: $dupes"; exit 1; }
+          cat dist/SHA256SUMS-*.txt | sort -k2 > dist/SHA256SUMS.txt
+          rm dist/SHA256SUMS-*.txt
+          (cd dist && sha256sum --check --strict SHA256SUMS.txt)
+          # Exactly the listed files, matching hashes and signatures, and every platform present.
+          node .github/scripts/validate-installers.mjs verify \
+            --dir dist --version "${{ needs.metadata.outputs.version }}" --require-platforms
+
+      - name: Refuse to modify an existing release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "::error::A release named ${GITHUB_REF_NAME} already exists. Delete the draft or use a new tag; CI never overwrites releases."
+            exit 1
+          fi
+
+      - name: Attest installer provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.dmg
+            dist/*.msi
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
 
       - name: Create draft release
         env:
@@ -281,5 +332,6 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" dist/* \
             --repo "${GITHUB_REPOSITORY}" \
             --draft \
+            --verify-tag \
             --title "CloudCraft ${GITHUB_REF_NAME}" \
-            --notes "Draft created by CI. Verify downloads with SHA256SUMS.txt. Signature status for each platform is listed in the build job summaries."
+            --notes "Draft created by CI and not yet published. Every installer is listed in SHA256SUMS.txt (the in-app updater refuses anything else) and has a Sigstore build-provenance attestation: \`gh attestation verify <file> --repo ${GITHUB_REPOSITORY}\`. Platform code-signing status is listed in each build job summary; installers built without signing secrets are unsigned."

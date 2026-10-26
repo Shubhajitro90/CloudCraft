@@ -600,6 +600,8 @@ fn main() {
                 .build(),
         )
         .setup(|app| {
+            cloudcraft_cloud_session::init(app.handle());
+
             #[cfg(target_os = "macos")]
             {
                 let payload = macos::deep_link::get_or_init_payload(app);
