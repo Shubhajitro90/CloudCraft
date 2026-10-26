@@ -239,7 +239,7 @@ jobs:
             build-essential libssl-dev libxdo-dev libayatana-appindicator3-dev \
             librsvg2-dev libwebkit2gtk-4.1-dev pkg-config \
             xvfb xauth x11-apps mesa-utils libegl1 libgl1-mesa-dri \
-            pulseaudio openssl curl
+            pulseaudio pulseaudio-utils dbus-x11 openssl curl
 
       - name: Download and verify Sunshine and Moonlight (pinned SHA-256)
         run: |

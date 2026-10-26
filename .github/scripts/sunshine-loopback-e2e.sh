@@ -55,6 +55,16 @@ pids+=($!)
 Xvfb "$CLIENT_DISPLAY" -screen 0 1280x720x24 -nolisten tcp >"$EVIDENCE/xvfb-client.log" 2>&1 &
 pids+=($!)
 pulseaudio --daemonize=yes --exit-idle-time=-1 --log-target="file:$EVIDENCE/pulseaudio.log" || log "pulseaudio unavailable; continuing without audio"
+if command -v pactl >/dev/null; then
+  for _ in $(seq 1 10); do pactl info >/dev/null 2>&1 && break; sleep 1; done
+  # Runners have no sound card; give Sunshine a sink to capture.
+  if pactl info >/dev/null 2>&1; then
+    pactl list short sinks | grep -q . || pactl load-module module-null-sink sink_name=cloudcraft_null >/dev/null
+    log "PulseAudio is up ($(pactl list short sinks | wc -l) sink(s))"
+  else
+    log "PulseAudio did not answer; continuing without audio"
+  fi
+fi
 sleep 1
 
 CONF="$HOME/.config/sunshine/sunshine.conf"
@@ -88,24 +98,45 @@ CERT_SHA256="$(echo | openssl s_client -connect 127.0.0.1:47990 2>/dev/null | op
 api() { curl -fsS -k -u "admin:$PASSWORD" "$@"; }
 
 # One-time PIN pairing, the same handshake a user performs in the Sunshine web UI.
-DISPLAY="$CLIENT_DISPLAY" timeout 60 "$CLOUDCRAFT_MOONLIGHT" pair 127.0.0.1 --pin "$PIN" >"$EVIDENCE/moonlight-pair.log" 2>&1 &
-pair_pid=$!
-pids+=("$pair_pid")
-pairing_id=""
-for _ in $(seq 1 40); do
-  pairing_id="$(api https://127.0.0.1:47990/api/pin | grep -o '"id":"[0-9a-fA-F]\{32\}"' | head -1 | cut -d'"' -f4 || true)"
-  [ -n "$pairing_id" ] && break
-  sleep 1
+# Moonlight 6.2.0 derives its AES key with QByteArray(hash.constData()), which stops
+# at the first NUL byte, so roughly 1 in 16 attempts fails with "Incorrect PIN"
+# regardless of the PIN. Each attempt uses a fresh random salt, so retry with a
+# clean Moonlight identity.
+MOONLIGHT_CONFIG="$HOME/.config/Moonlight Game Streaming Project"
+try_pair() {
+  local attempt="$1" pair_pid pairing_id="" paired=1
+  rm -rf "$MOONLIGHT_CONFIG"
+  DISPLAY="$CLIENT_DISPLAY" timeout 60 "$CLOUDCRAFT_MOONLIGHT" pair 127.0.0.1 --pin "$PIN" \
+    >"$EVIDENCE/moonlight-pair-$attempt.log" 2>&1 &
+  pair_pid=$!
+  pids+=("$pair_pid")
+  for _ in $(seq 1 40); do
+    pairing_id="$(api https://127.0.0.1:47990/api/pin | grep -o '"id":"[0-9a-fA-F]\{32\}"' | head -1 | cut -d'"' -f4 || true)"
+    [ -n "$pairing_id" ] && break
+    sleep 1
+  done
+  if [ -z "$pairing_id" ]; then
+    log "attempt $attempt: Moonlight never requested pairing"
+  elif api -H 'Content-Type: application/json' -X POST \
+      -d "{\"pairing_id\":\"$pairing_id\",\"pin\":\"$PIN\",\"name\":\"cloudcraft-e2e\"}" \
+      https://127.0.0.1:47990/api/pin | grep -q '"status":true' \
+    && api https://127.0.0.1:47990/api/clients/list | grep -q '"name":"cloudcraft-e2e"'; then
+    paired=0
+  else
+    log "attempt $attempt: pairing was rejected ($(grep -o 'Qt Critical: .*' "$EVIDENCE/moonlight-pair-$attempt.log" | head -1))"
+  fi
+  # The pair command keeps its window open; on success pairing is recorded on both sides.
+  kill "$pair_pid" 2>/dev/null || true
+  wait "$pair_pid" 2>/dev/null || true
+  return "$paired"
+}
+paired=no
+for attempt in 1 2 3 4 5; do
+  if try_pair "$attempt"; then paired=yes; break; fi
+  sleep 2
 done
-[ -n "$pairing_id" ] || { log "Moonlight never requested pairing"; tail -20 "$EVIDENCE/moonlight-pair.log"; exit 1; }
-api -H 'Content-Type: application/json' -X POST \
-  -d "{\"pairing_id\":\"$pairing_id\",\"pin\":\"$PIN\",\"name\":\"cloudcraft-e2e\"}" \
-  https://127.0.0.1:47990/api/pin | grep -q '"status":true' || { log "PIN was rejected"; exit 1; }
-api https://127.0.0.1:47990/api/clients/list | grep -q '"name":"cloudcraft-e2e"' || { log "Client is not paired"; exit 1; }
-# The pair command keeps its window open; pairing is already recorded on both sides.
-kill "$pair_pid" 2>/dev/null || true
-wait "$pair_pid" 2>/dev/null || true
-log "Moonlight is paired"
+[ "$paired" = yes ] || { log "Moonlight could not pair after 5 attempts"; exit 1; }
+log "Moonlight is paired (attempt $attempt)"
 
 capture_frames() {
   sleep $((HOLD / 2 + 6))
